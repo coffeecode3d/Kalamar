@@ -54,6 +54,9 @@ jobs:
       - name: Interface dependencies
         working-directory: launcher
         run: npm ci --no-audit --no-fund
+      - name: Interface build (the back end embeds it)
+        working-directory: launcher
+        run: npm run build
       - name: Tests of the back end (Linux)
         working-directory: launcher/src-tauri
         run: cargo test --locked --lib
