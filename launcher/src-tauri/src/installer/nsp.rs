@@ -116,6 +116,15 @@ pub struct NspInfo {
 pub fn inspect(path: &Path) -> std::io::Result<NspInfo> {
     let mut f = std::fs::File::open(path)?;
     let size = f.metadata()?.len();
+    let mut magic = [0u8; 4];
+    f.read_exact(&mut magic)?;
+    f.seek(SeekFrom::Start(0))?;
+    if &magic != b"PFS0" {
+        // An XCI cartridge image: the game's files are in its `secure` HFS0 partition, and no content-meta XML is
+        // stored in clear text (the check during the install still verifies the extracted code's hash).
+        let entries = xci_entries(&mut f, size)?;
+        return Ok(NspInfo { entries, meta: None, size });
+    }
     let (entries, xml) = pfs0_entries(&mut f)?;
     let mut meta = None;
     // Exactly the entry the table located (at most XML_MAX bytes), and only when it lies inside the file.
@@ -129,6 +138,81 @@ pub fn inspect(path: &Path) -> std::io::Result<NspInfo> {
         meta = parse_cnmt_xml(&String::from_utf8_lossy(&buf));
     }
     Ok(NspInfo { entries, meta, size })
+}
+
+/// One entry of an HFS0 partition: its name, where its data starts (relative to that partition) and its size.
+struct HfsEntry {
+    name: String,
+    offset: u64,
+    size: u64,
+}
+
+/// The file table of the HFS0 partition at `at` (an XCI's root or `secure` partition), bounded by `bound` bytes.
+fn hfs0_entries(f: &mut (impl Read + Seek), at: u64, bound: u64) -> std::io::Result<Vec<HfsEntry>> {
+    if bound < 16 {
+        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "truncated HFS0 header"));
+    }
+    f.seek(SeekFrom::Start(at))?;
+    let mut h = [0u8; 16];
+    f.read_exact(&mut h)?;
+    if &h[0..4] != b"HFS0" {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not HFS0"));
+    }
+    let n = u32::from_le_bytes(h[4..8].try_into().unwrap()) as usize;
+    let strsz = u32::from_le_bytes(h[8..12].try_into().unwrap()) as usize;
+    if n == 0 || n > 4096 || strsz > 1024 * 1024 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "implausible HFS0 table"));
+    }
+    let table = 16 + 64 * n + strsz;
+    if table as u64 > bound {
+        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "HFS0 table past the partition"));
+    }
+    let mut ents = vec![0u8; 64 * n];
+    f.read_exact(&mut ents)?;
+    let mut strs = vec![0u8; strsz];
+    f.read_exact(&mut strs)?;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let e = &ents[64 * i..64 * i + 64];
+        let noff = u32::from_le_bytes(e[0..4].try_into().unwrap()) as usize;
+        let off = u32::from_le_bytes(e[4..8].try_into().unwrap()) as u64;
+        let size = u32::from_le_bytes(e[8..12].try_into().unwrap()) as u64;
+        if noff >= strsz || table as u64 + off + size > bound {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "HFS0 entry out of bounds"));
+        }
+        let end = strs[noff..].iter().position(|&b| b == 0).map(|p| noff + p).unwrap_or(strsz);
+        let name = String::from_utf8_lossy(&strs[noff..end]).into_owned();
+        if name.is_empty() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "empty HFS0 name"));
+        }
+        out.push(HfsEntry { name, offset: off, size });
+    }
+    Ok(out)
+}
+
+/// The files of an XCI's `secure` partition (the game's NCAs).
+pub fn xci_entries(f: &mut (impl Read + Seek), size: u64) -> std::io::Result<Vec<Entry>> {
+    if size < 0x140 {
+        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "truncated XCI"));
+    }
+    f.seek(SeekFrom::Start(0x100))?;
+    let mut head = [0u8; 4];
+    f.read_exact(&mut head)?;
+    if &head != b"HEAD" {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not an XCI or NSP"));
+    }
+    f.seek(SeekFrom::Start(0x130))?;
+    let mut b = [0u8; 8];
+    f.read_exact(&mut b)?;
+    let root = u64::from_le_bytes(b);
+    if root < 0x140 || root >= size {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "XCI root partition out of bounds"));
+    }
+    let parts = hfs0_entries(f, root, size - root)?;
+    let secure = parts.iter().find(|p| p.name == "secure").ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "no secure partition"))?;
+    let at = root.checked_add(secure.offset).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "secure partition offset"))?;
+    let entries = hfs0_entries(f, at, secure.size)?;
+    Ok(entries.into_iter().map(|e| Entry { name: e.name, size: e.size }).collect())
 }
 
 /// The Program NCA: the largest plain `.nca` (not `.cnmt.nca`).
@@ -281,6 +365,39 @@ mod tests {
         out.extend(strs);
         out.extend(data);
         out
+    }
+
+    /// A minimal XCI: a HEAD header, a root HFS0 with a `secure` partition, and one file in it. No game data.
+    #[test]
+    fn an_xci_lists_the_files_of_its_secure_partition() {
+        let mut img = vec![0u8; 0x2000];
+        img[0x100..0x104].copy_from_slice(b"HEAD");
+        img[0x130..0x138].copy_from_slice(&0x200u64.to_le_bytes());
+        // root HFS0 at 0x200: one entry, `secure`, at 0x100 from the header, 0x400 bytes.
+        img[0x200..0x204].copy_from_slice(b"HFS0");
+        img[0x204..0x208].copy_from_slice(&1u32.to_le_bytes());
+        img[0x208..0x20c].copy_from_slice(&7u32.to_le_bytes()); // "secure\0"
+        img[0x210..0x214].copy_from_slice(&0u32.to_le_bytes()); // name offset
+        img[0x214..0x218].copy_from_slice(&0x100u32.to_le_bytes()); // offset
+        img[0x218..0x21c].copy_from_slice(&0x400u32.to_le_bytes()); // size
+        img[0x250..0x257].copy_from_slice(b"secure\0");
+        // secure HFS0 at 0x300: one fake NCA, 0x100 bytes.
+        img[0x300..0x304].copy_from_slice(b"HFS0");
+        img[0x304..0x308].copy_from_slice(&1u32.to_le_bytes());
+        img[0x308..0x30c].copy_from_slice(&9u32.to_le_bytes()); // "fake.nca\0"
+        img[0x310..0x314].copy_from_slice(&0u32.to_le_bytes());
+        img[0x314..0x318].copy_from_slice(&0x100u32.to_le_bytes());
+        img[0x318..0x31c].copy_from_slice(&0x100u32.to_le_bytes());
+        img[0x350..0x359].copy_from_slice(b"fake.nca\0");
+        let p = write("xci", &img);
+        let info = inspect(&p).unwrap();
+        assert_eq!(info.size, 0x2000);
+        assert_eq!(info.entries.len(), 1);
+        assert_eq!(info.entries[0].name, "fake.nca");
+        assert_eq!(info.entries[0].size, 0x100);
+        assert!(info.meta.is_none());
+        assert_eq!(program_nca(&info.entries).unwrap().name, "fake.nca");
+        std::fs::remove_file(&p).ok();
     }
 
     fn write(tag: &str, bytes: &[u8]) -> std::path::PathBuf {

@@ -165,7 +165,7 @@ export default function Wizard({ reinstall, onExit, firstRun }: { reinstall?: bo
   const pick = async (kind: FileKind) => {
     const filters = kind === "keys"
       ? [{ name: w("wiz.filter.keys"), extensions: ["keys"] }, { name: w("wiz.filter.all"), extensions: ["*"] }]
-      : [{ name: w("wiz.filter.nsp"), extensions: ["nsp"] }, { name: w("wiz.filter.all"), extensions: ["*"] }];
+      : [{ name: w("wiz.filter.nsp"), extensions: ["nsp", "xci"] }, { name: w("wiz.filter.all"), extensions: ["*"] }];
     const r = await open({ multiple: false, directory: false, filters, title: w(`wiz.file.${kind}`) });
     if (typeof r === "string") setReq((q) => ({ ...q, [kind === "base" ? "base_nsp" : kind === "update" ? "update_nsp" : "prod_keys"]: r }));
   };
