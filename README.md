@@ -1,5 +1,9 @@
 # Kalamar
 
+> **This fork adds a Linux port.** See [LINUX.md](LINUX.md) for the AppImage, the system requirements and how this
+> branch stays level with upstream. Everything below is the upstream project's documentation and remains true, except
+> that the launcher and the game also build and run on Linux.
+
 **Kalamar** builds a native Windows version of a Nintendo Switch game *from your own copy of it*, on your own PC, and
 lets you play it offline with keyboard, mouse or gamepad. Multiplayer exists only if you choose to add a community
 server, and anyone can run one or write their own from the open documentation.

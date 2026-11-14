@@ -1,0 +1,95 @@
+# Keeps this fork level with CyriacFR/Kalamar without any local work:
+#   1. `main` is a read-only mirror of upstream's `main` (fast-forwarded to upstream every run);
+#   2. `linux` is `main` plus the Linux port, so upstream's commits arrive there by a merge, one merge commit per run.
+# When the merge conflicts, nothing is pushed: the job opens an issue naming the files, and the next run tries again
+# after `linux` has been fixed by hand.
+name: Sync with upstream
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: linux
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Configure git
+        run: |
+          git config user.name "kalamar-sync[bot]"
+          git config user.email "kalamar-sync[bot]@users.noreply.github.com"
+      - name: Mirror upstream into main
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/CyriacFR/Kalamar.git
+          git fetch --no-tags upstream main
+          # main is a mirror: any local commit there would be lost, which the force-with-lease below makes visible.
+          git push --force-with-lease origin upstream/main:main || {
+            echo "::warning::main has commits of its own; not overwriting it"
+          }
+      - name: Merge main into linux
+        id: merge
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if git merge --no-edit origin/main; then
+            if git diff --quiet HEAD origin/linux; then
+              echo "linux is already up to date"
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            else
+              git push origin HEAD:linux
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            git diff --name-only --diff-filter=U > /tmp/conflict-files.txt || true
+            git merge --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+      - name: Open an issue when the merge conflicts
+        if: steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="Upstream sync needs a hand: the merge into linux conflicts"
+          open=$(gh issue list --state open --json title --jq "[.[] | select(.title == \"$title\")] | length")
+          if [ "$open" = "0" ]; then
+            {
+              echo "The weekly merge of \`CyriacFR/Kalamar\`'s \`main\` into \`linux\` conflicts. Nothing was pushed."
+              echo
+              echo "Fix it locally:"
+              echo
+              echo '```sh'
+              echo "git fetch upstream && git checkout linux && git merge upstream/main"
+              echo "# resolve, then: git push origin linux"
+              echo '```'
+              echo
+              if [ -s /tmp/conflict-files.txt ]; then
+                echo
+                echo "Files the merge could not reconcile:"
+                while read -r f; do [ -n "$f" ] && echo "- \`$f\`"; done < /tmp/conflict-files.txt
+              fi
+              echo
+              echo "Last run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            } > /tmp/issue.md
+            gh issue create --title "$title" --body-file /tmp/issue.md --label "upstream-sync" || \
+              gh issue create --title "$title" --body-file /tmp/issue.md
+          else
+            echo "An open issue already describes this conflict."
+          fi
+          exit 1
