@@ -45,7 +45,7 @@ The launcher keeps its data in `$XDG_DATA_HOME/dev.kalamar.launcher` (`~/.local/
 
 - **Build tools on Linux are the system's**, as the engine documents in
   [engine/docs/building.md](engine/docs/building.md#linux-in-progress): `clang`, `lld`, `llvm-ar`, `ninja`, `make`,
-  `python3` (3.12+, with `venv`), `git`, the .NET 10 SDK, and the SDL3, Opus, libvpx, Zstandard and Vulkan development
+  `python3` (3.14+, with `venv`; the engine tools use the standard library's `compression.zstd`), `git`, the .NET 10 SDK, and the SDL3, Opus, libvpx, Zstandard and Vulkan development
   packages. The launcher installs none of them: the plan lists what is missing with the package names to install, and
   the wizard stops with that list rather than changing your system.
 - **Python** is a virtual environment in the install folder (`work/venv`), from the system's `python3`, with the pinned
@@ -109,7 +109,7 @@ Not verified here, and worth reporting:
 
 - A full install from real game files on Linux, and playing the built game.
 - The Steam Deck (SteamOS) and distributions other than the one used for the build.
-- Distributions whose `python3` is older than 3.12 or without `venv`.
+- Distributions whose `python3` is older than 3.14 or without `venv`.
 
 The engine's own Linux status (tested on a few AMD and NVIDIA cards, not on Intel or the Deck) is in
 [engine/docs/building.md](engine/docs/building.md#linux-in-progress).

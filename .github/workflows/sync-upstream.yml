@@ -1,8 +1,14 @@
 # Keeps this fork level with CyriacFR/Kalamar without any local work:
-#   1. `main` is a read-only mirror of upstream's `main` (fast-forwarded to upstream every run);
+#   1. `main` is a read-only mirror of upstream's `main`, fast-forwarded through GitHub's own "merge upstream" API;
 #   2. `linux` is `main` plus the Linux port, so upstream's commits arrive there by a merge, one merge commit per run.
 # When the merge conflicts, nothing is pushed: the job opens an issue naming the files, and the next run tries again
 # after `linux` has been fixed by hand.
+#
+# A push that would change a workflow file (`.github/workflows/...`) is refused to the workflow's own GitHub token.
+# Add a personal access token with the `repo` and `workflow` scopes as the `SYNC_TOKEN` secret to let the sync push
+# those commits too; without it, the job says so in an issue instead of failing silently. account: Settings >
+# Developer settings > Personal access tokens (classic), then:
+#   gh secret set SYNC_TOKEN --repo <owner>/<repo>
 name: Sync with upstream
 
 on:
@@ -13,6 +19,7 @@ on:
 permissions:
   contents: write
   issues: write
+  pull-requests: write
 
 concurrency:
   group: sync-upstream
@@ -28,68 +35,75 @@ jobs:
           ref: linux
           fetch-depth: 0
           persist-credentials: true
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
       - name: Configure git
         run: |
           git config user.name "kalamar-sync[bot]"
           git config user.email "kalamar-sync[bot]@users.noreply.github.com"
-      - name: Mirror upstream into main
+      - name: Fast-forward main through GitHub
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
         run: |
-          set -euo pipefail
-          git remote add upstream https://github.com/CyriacFR/Kalamar.git
-          git fetch --no-tags upstream main
-          # main is a mirror: any local commit there would be lost, which the force-with-lease below makes visible.
-          git push --force-with-lease origin upstream/main:main || {
-            echo "::warning::main has commits of its own; not overwriting it"
-          }
-      - name: Merge main into linux
+          # Server-side: not a git push, so upstream's workflow files do not need the token's workflow scope.
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/merge-upstream" -f branch=main \
+            || echo "::warning::main could not be fast-forwarded (it may have commits of its own)"
+      - name: Merge upstream into linux
         id: merge
         run: |
-          set -euo pipefail
-          git fetch origin main
-          if git merge --no-edit origin/main; then
+          set -uo pipefail
+          git remote add upstream https://github.com/CyriacFR/Kalamar.git
+          git fetch --no-tags upstream main
+          if git merge --no-edit upstream/main; then
             if git diff --quiet HEAD origin/linux; then
               echo "linux is already up to date"
-              echo "changed=false" >> "$GITHUB_OUTPUT"
+            elif git push origin HEAD:linux; then
+              echo "linux updated"
             else
-              git push origin HEAD:linux
-              echo "changed=true" >> "$GITHUB_OUTPUT"
+              echo "blocked=true" >> "$GITHUB_OUTPUT"
             fi
           else
             git diff --name-only --diff-filter=U > /tmp/conflict-files.txt || true
             git merge --abort
             echo "conflict=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Explain what needs a hand
+        if: steps.merge.outputs.conflict == 'true' || steps.merge.outputs.blocked == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+        run: |
+          set -uo pipefail
+          if [ "${{ steps.merge.outputs.blocked }}" = "true" ]; then
+            title="Upstream sync is blocked by the workflow file permission (SYNC_TOKEN)"
+            reason="Upstream changed a workflow file, and the workflow's own token may not update those. Add a personal
+          access token with the \`repo\` and \`workflow\` scopes as the \`SYNC_TOKEN\` secret (Settings > Secrets and
+          variables > Actions), or merge by hand."
+          else
+            title="Upstream sync needs a hand: the merge into linux conflicts"
+            reason="The weekly merge of \`CyriacFR/Kalamar\`'s \`main\` into \`linux\` conflicts. Nothing was pushed."
+          fi
+          open=$(gh issue list --state open --json title --jq "[.[] | select(.title == \"$title\")] | length")
+          if [ "$open" != "0" ]; then
+            echo "An open issue already describes this."
             exit 0
           fi
-      - name: Open an issue when the merge conflicts
-        if: steps.merge.outputs.conflict == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          title="Upstream sync needs a hand: the merge into linux conflicts"
-          open=$(gh issue list --state open --json title --jq "[.[] | select(.title == \"$title\")] | length")
-          if [ "$open" = "0" ]; then
-            {
-              echo "The weekly merge of \`CyriacFR/Kalamar\`'s \`main\` into \`linux\` conflicts. Nothing was pushed."
+          {
+            echo "$reason"
+            echo
+            echo "By hand:"
+            echo
+            echo '```sh'
+            echo "git fetch upstream && git checkout linux && git merge upstream/main"
+            echo "# resolve, then: git push origin linux"
+            echo '```'
+            if [ -s /tmp/conflict-files.txt ]; then
               echo
-              echo "Fix it locally:"
-              echo
-              echo '```sh'
-              echo "git fetch upstream && git checkout linux && git merge upstream/main"
-              echo "# resolve, then: git push origin linux"
-              echo '```'
-              echo
-              if [ -s /tmp/conflict-files.txt ]; then
-                echo
-                echo "Files the merge could not reconcile:"
-                while read -r f; do [ -n "$f" ] && echo "- \`$f\`"; done < /tmp/conflict-files.txt
-              fi
-              echo
-              echo "Last run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            } > /tmp/issue.md
-            gh issue create --title "$title" --body-file /tmp/issue.md --label "upstream-sync" || \
-              gh issue create --title "$title" --body-file /tmp/issue.md
-          else
-            echo "An open issue already describes this conflict."
-          fi
-          exit 1
+              echo "Files the merge could not reconcile:"
+              while read -r f; do [ -n "$f" ] && echo "- \`$f\`"; done < /tmp/conflict-files.txt
+            fi
+            echo
+            echo "Last run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > /tmp/issue.md
+          gh issue create --title "$title" --body-file /tmp/issue.md || true
+      - name: Fail when nothing could be pushed
+        if: steps.merge.outputs.conflict == 'true' || steps.merge.outputs.blocked == 'true'
+        run: exit 1

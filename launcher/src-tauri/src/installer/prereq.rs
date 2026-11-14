@@ -354,11 +354,11 @@ fn dotnet_sdk_10() -> bool {
         .is_some_and(|d| run_capture(&d, &["--list-sdks"], T).is_some_and(|(_, out)| out.lines().any(|l| l.trim_start().starts_with("10."))))
 }
 
-/// A `python3` recent enough for the build tools (3.12+) whose `venv` module works (Debian keeps it in `python3-venv`).
+/// A `python3` recent enough for the build tools (3.14+: `compression.zstd` is in the standard library) whose `venv` module works (Debian keeps it in `python3-venv`).
 #[cfg(not(windows))]
 pub fn python_usable() -> bool {
     on_path("python3").into_iter().next().is_some_and(|p| {
-        run_capture(&p, &["-c", "import sys, venv, ensurepip; print(sys.version_info >= (3, 12))"], T)
+        run_capture(&p, &["-c", "import sys, venv, ensurepip; print(sys.version_info >= (3, 14))"], T)
             .is_some_and(|(c, out)| c == 0 && out.trim() == "True")
     })
 }
