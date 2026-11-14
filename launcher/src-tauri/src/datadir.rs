@@ -62,9 +62,19 @@ impl Roots {
             let a = PathBuf::from(a);
             return Some(Roots { roaming: a.join("Roaming"), local: a.join("Local") });
         }
-        let roaming = PathBuf::from(get("APPDATA").filter(|v| !v.is_empty())?);
-        let local = get("LOCALAPPDATA").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| roaming.clone());
-        Some(Roots { roaming, local })
+        #[cfg(windows)]
+        {
+            let roaming = PathBuf::from(get("APPDATA").filter(|v| !v.is_empty())?);
+            let local = get("LOCALAPPDATA").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| roaming.clone());
+            Some(Roots { roaming, local })
+        }
+        #[cfg(not(windows))]
+        {
+            // XDG: data under `$XDG_DATA_HOME` (~/.local/share), caches and the WebView's profile under `$XDG_CACHE_HOME`.
+            let home = PathBuf::from(get("HOME").filter(|v| !v.is_empty())?);
+            let dir = |var: &str, fallback: &str| get(var).filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| home.join(fallback));
+            Some(Roots { roaming: dir("XDG_DATA_HOME", ".local/share"), local: dir("XDG_CACHE_HOME", ".cache") })
+        }
     }
     pub fn data(&self) -> PathBuf {
         self.roaming.join(IDENTIFIER)
@@ -194,7 +204,7 @@ fn decide(get: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Resolved {
     let lock = MoveLock::take(Duration::from_secs(20));
     let probes = Probes { old_launcher_open: &|| file_held(&roots.legacy_webview_lock()), rename: &|a, b| std::fs::rename(a, b), stop_at: None };
     let (dir, outcome) = resolve(&roots, &probes, lock.is_some(), crate::util::now_secs()).unwrap_or_else(|Stopped| (roots.legacy(), Outcome::Fresh));
-    drop(lock);
+    let _ = lock;
     if let Outcome::Deferred { .. } = outcome {
         hold(&dir);
     }
@@ -847,6 +857,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn the_folder_named_by_a_variable_is_used_as_it_is_the_new_name_first() {
         let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| std::ffi::OsString::from(v));
         let r = decide(&env(&[(ENV_DATA, r"D:\new"), (LEGACY_ENV_DATA, r"D:\old")]));
@@ -983,6 +994,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn a_game_installed_in_the_old_folder_stays_there_and_the_rest_moves() {
         let t = T::new("split");
         t.fill_old(true);

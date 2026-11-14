@@ -20,21 +20,40 @@ pub fn no_window(cmd: &mut Command) -> &mut Command {
 }
 
 /// `CREATE_NO_WINDOW`, plus below-normal priority when asked (inherited by every process the command starts).
+/// On Linux the command gets its own process group, so cancelling can kill the whole tree (Python, Ninja, clang, git,
+/// dotnet) with one signal, and `nice` lowers its priority.
 pub fn build_command(cmd: &mut Command, low_priority: bool) -> &mut Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW | if low_priority { BELOW_NORMAL_PRIORITY_CLASS } else { 0 });
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+        if low_priority {
+            // SAFETY: `nice` only changes the child's own scheduling priority.
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::nice(10);
+                    Ok(())
+                });
+            }
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
     let _ = low_priority;
     cmd
 }
 
 /// A job object whose processes all die when it is terminated or when its last handle closes (the launcher exiting).
+/// On Linux it is the child's process group (set by [`build_command`]), terminated with `SIGKILL`.
 pub struct Job {
     #[cfg(windows)]
     handle: windows_sys::Win32::Foundation::HANDLE,
+    #[cfg(unix)]
+    pgid: std::sync::Mutex<Option<i32>>,
 }
 
 // SAFETY: the job handle is a kernel handle usable from any thread.
@@ -74,7 +93,10 @@ impl Job {
     }
     #[cfg(not(windows))]
     pub fn new(_low_priority: bool) -> std::io::Result<Job> {
-        Ok(Job {})
+        Ok(Job {
+            #[cfg(unix)]
+            pgid: std::sync::Mutex::new(None),
+        })
     }
 
     #[cfg(windows)]
@@ -84,7 +106,13 @@ impl Job {
         let ok = unsafe { windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(self.handle, child.as_raw_handle() as _) };
         if ok == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    pub fn assign(&self, child: &Child) -> std::io::Result<()> {
+        // build_command put the child in its own process group whose id is the child's pid.
+        *self.pgid.lock().unwrap_or_else(|e| e.into_inner()) = Some(child.id() as i32);
+        Ok(())
+    }
+    #[cfg(not(any(windows, unix)))]
     pub fn assign(&self, _child: &Child) -> std::io::Result<()> {
         Ok(())
     }
@@ -95,7 +123,16 @@ impl Job {
         // SAFETY: valid job handle.
         unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.handle, 1) };
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    pub fn terminate(&self) {
+        if let Some(pgid) = *self.pgid.lock().unwrap_or_else(|e| e.into_inner()) {
+            // SAFETY: a negative pid asks the kernel to signal the process group; ESRCH (already gone) is ignored.
+            unsafe {
+                libc::kill(-pgid, libc::SIGKILL);
+            }
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
     pub fn terminate(&self) {}
 }
 
@@ -106,6 +143,8 @@ impl Drop for Job {
         unsafe {
             windows_sys::Win32::Foundation::CloseHandle(self.handle);
         }
+        #[cfg(unix)]
+        self.terminate();
     }
 }
 
@@ -124,11 +163,29 @@ pub fn free_bytes(path: &Path) -> Option<u64> {
         let ok = unsafe { windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(wide.as_ptr(), &mut avail, &mut total, &mut free) };
         if ok == 0 { None } else { Some(avail) }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(p.as_os_str().as_bytes()).ok()?;
+        // SAFETY: a valid NUL-terminated path and an owned, zero-initialised statvfs.
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        let ok = unsafe { libc::statvfs(c.as_ptr(), &mut st) };
+        if ok == 0 { Some(st.f_bavail as u64 * st.f_frsize as u64) } else { None }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = p;
         None
     }
+}
+
+/// One field of `/proc/meminfo` in bytes (`MemTotal`, `MemAvailable`).
+#[cfg(target_os = "linux")]
+fn meminfo(field: &str) -> Option<u64> {
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = text.lines().find(|l| l.starts_with(field))?;
+    let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kb * 1024)
 }
 
 /// Total physical memory in bytes.
@@ -143,7 +200,11 @@ pub fn total_ram() -> Option<u64> {
             if GlobalMemoryStatusEx(&mut m) == 0 { None } else { Some(m.ullTotalPhys) }
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        meminfo("MemTotal:")
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     None
 }
 
@@ -159,8 +220,20 @@ pub fn available_ram() -> Option<u64> {
             if GlobalMemoryStatusEx(&mut m) == 0 { None } else { Some(m.ullAvailPhys) }
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        meminfo("MemAvailable:")
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     None
+}
+
+/// Every numeric `/proc` directory: one running process.
+#[cfg(target_os = "linux")]
+fn proc_pids() -> Vec<u32> {
+    std::fs::read_dir("/proc")
+        .map(|rd| rd.flatten().filter_map(|e| e.file_name().to_str().and_then(|n| n.parse().ok())).collect())
+        .unwrap_or_default()
 }
 
 /// Number of running processes with this executable file name (case-insensitive), e.g. `splat3.exe`.
@@ -190,7 +263,14 @@ pub fn count_processes(exe_name: &str) -> usize {
         }
         n
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        proc_pids()
+            .into_iter()
+            .filter(|pid| std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.trim().eq_ignore_ascii_case(exe_name)))
+            .count()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = exe_name;
         0
@@ -235,7 +315,38 @@ pub fn physical_cores() -> usize {
             if cores == 0 { cpus() } else { cores }
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        // One (physical id, core id) pair per core; "cpu cores" of the first processor when the ids are absent.
+        let text = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+        let mut cores: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+        let (mut phys, mut core) = (String::new(), String::new());
+        let mut per_socket = 0usize;
+        for line in text.lines() {
+            match line.split_once(':').map(|(k, v)| (k.trim(), v.trim())) {
+                Some(("physical id", v)) => phys = v.to_string(),
+                Some(("core id", v)) => core = v.to_string(),
+                Some(("cpu cores", v)) if per_socket == 0 => per_socket = v.parse().unwrap_or(0),
+                Some(("processor", _)) => {
+                    if !core.is_empty() {
+                        cores.insert((phys.clone(), core.clone()));
+                        core.clear();
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !core.is_empty() {
+            cores.insert((phys, core));
+        }
+        let sockets = text.lines().filter(|l| l.starts_with("physical id")).count().max(1);
+        match (cores.len(), per_socket) {
+            (0, n) if n > 0 => n * sockets,
+            (0, _) => cpus(),
+            (n, _) => n,
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     cpus()
 }
 
@@ -278,7 +389,15 @@ pub fn count_image(exe: &Path) -> usize {
         }
         n
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let want = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+        proc_pids()
+            .into_iter()
+            .filter(|pid| std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|p| p == want))
+            .count()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = exe;
         0

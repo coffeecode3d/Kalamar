@@ -45,11 +45,13 @@ static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
 static ON_EVENT: std::sync::OnceLock<fn(Event)> = std::sync::OnceLock::new();
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(windows), allow(dead_code))]
 enum Event {
     Open,
     Quit,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn dispatch(e: Event) {
     if let Some(f) = ON_EVENT.get() {
         f(e);
@@ -208,6 +210,7 @@ fn quit() {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn menu_words() -> (String, String) {
     with(|s| (s.texts.open.clone(), s.texts.quit.clone()))
 }

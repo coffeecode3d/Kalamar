@@ -222,23 +222,48 @@ struct Shared {
 pub const RESTART_LINE: &str = "restarting so the game loads the new save";
 
 /// The script of [`kill_same_exe`]: its values come from its environment.
+#[cfg(windows)]
 const KILL_SCRIPT: &str = "Get-CimInstance Win32_Process -Filter \"Name='splat3.exe'\" | Where-Object { $_.ExecutablePath -eq $env:KLM_KILL_PATH -and $_.CommandLine -and $_.CommandLine.Contains($env:KLM_KILL_NEEDLE) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }";
 
 /// Ends every process running exactly this executable whose command line holds `needle` (the restarted game is not our
 /// child; the needle is its `--profile` folder, which tells two instances apart). Matches on the full path, so another
 /// build of the game is never touched.
 fn kill_same_exe(exe: &Path, needle: &str) {
-    let mut cmd = Command::new(crate::winutil::system_exe(r"WindowsPowerShell\v1.0\powershell.exe"));
-    cmd.args(["-NoProfile", "-NonInteractive", "-Command", KILL_SCRIPT]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    // The path and the needle reach the script as environment variables, never inside its text: no quoting to get
-    // right (PowerShell also takes the typographic quotes U+2018 to U+201B as quotes).
-    cmd.env("KLM_KILL_PATH", exe.as_os_str()).env("KLM_KILL_NEEDLE", needle);
+    #[cfg(not(windows))]
+    {
+        // The same scan as `ps`, over /proc: the executable's real path and the arguments after NUL separators.
+        let want = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+        let Ok(rd) = std::fs::read_dir("/proc") else { return };
+        for e in rd.flatten() {
+            let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<i32>().ok()) else { continue };
+            if pid == std::process::id() as i32 {
+                continue;
+            }
+            if std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|p| p == want)
+                && std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| c.split(|b| *b == 0).any(|a| a == needle.as_bytes()))
+            {
+                // SAFETY: a plain signal to a process the scan above matched by its executable and arguments.
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
+        return;
+    }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
+        let mut cmd = Command::new(crate::winutil::system_exe(r"WindowsPowerShell\v1.0\powershell.exe"));
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", KILL_SCRIPT]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        // The path and the needle reach the script as environment variables, never inside its text: no quoting to get
+        // right (PowerShell also takes the typographic quotes U+2018 to U+201B as quotes).
+        cmd.env("KLM_KILL_PATH", exe.as_os_str()).env("KLM_KILL_NEEDLE", needle);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        let _ = cmd.status();
     }
-    let _ = cmd.status();
 }
 
 pub type Notifier = Arc<dyn Fn(&GameStatus) + Send + Sync>;
@@ -394,22 +419,28 @@ impl GameManager {
 mod tests {
     use super::*;
 
-    // The whole launch specification for a root of C:\work\game-root.
+    /// A path as the launch specification holds it (`display()`).
+    fn shown(p: &Path) -> String {
+        p.display().to_string()
+    }
+
+    // The whole launch specification for a game root.
     #[test]
     fn spec_of_a_plain_launch() {
         let root = Path::new(r"C:\work\game-root");
-        let spec = build_launch_spec(root, &install::userdata_dir(root), None, &["--seconds".into(), "30".into()], &[], "20261110-020318", "hub");
-        assert_eq!(spec.exe, Path::new(r"C:\work\game-root\build\splat3.exe"));
-        assert_eq!(spec.cwd, Path::new(r"C:\work\game-root\userdata")); // the working directory is the user data folder
-        assert_eq!(spec.args, vec!["--profile", r"C:\work\game-root\userdata\profile", "--seconds", "30"]); // --profile, then the extra arguments
-        assert_eq!(spec.stderr_log, Path::new(r"C:\work\game-root\userdata\logs\run-20261110-020318.log"));
-        assert_eq!(spec.stdout_log, Path::new(r"C:\work\game-root\userdata\logs\run-20261110-020318.log.out"));
+        let userdata = install::userdata_dir(root);
+        let spec = build_launch_spec(root, &userdata, None, &["--seconds".into(), "30".into()], &[], "20261110-020318", "hub");
+        assert_eq!(spec.exe, install::exe_path(root));
+        assert_eq!(spec.cwd, userdata); // the working directory is the user data folder
+        assert_eq!(spec.args, vec!["--profile".to_string(), shown(&userdata.join("profile")), "--seconds".into(), "30".into()]); // --profile, then the extra arguments
+        assert_eq!(spec.stderr_log, userdata.join("logs").join("run-20261110-020318.log"));
+        assert_eq!(spec.stdout_log, userdata.join("logs").join("run-20261110-020318.log.out"));
         let env: std::collections::BTreeMap<_, _> = spec.env.iter().cloned().collect();
-        assert_eq!(env["TOTK_SHADER_CACHE"], r"C:\work\game-root\userdata\shader-cache");
-        assert_eq!(env["TOTK_PIPELINE_CACHE"], r"C:\work\game-root\userdata\pipeline-cache.bin");
-        assert_eq!(env["TOTK_ROMFS_PROOF_DIR"], r"C:\work\game-root\userdata");
-        assert_eq!(env["TOTK_XLATE"], r"C:\work\xlate\totk_xlate.exe"); // next to the game root
-        assert_eq!(env["TOTK_PROFILE_DIR"], r"C:\work\game-root\userdata\profile"); // keeps the launch inside this root's user data
+        assert_eq!(env["TOTK_SHADER_CACHE"], shown(&userdata.join("shader-cache")));
+        assert_eq!(env["TOTK_PIPELINE_CACHE"], shown(&userdata.join("pipeline-cache.bin")));
+        assert_eq!(env["TOTK_ROMFS_PROOF_DIR"], shown(&userdata));
+        assert_eq!(env["TOTK_XLATE"], shown(&install::translator_path(root, None))); // next to the game root
+        assert_eq!(env["TOTK_PROFILE_DIR"], shown(&userdata.join("profile"))); // keeps the launch inside this root's user data
         // the launcher shows the Discord presence, the game it starts stays quiet
         assert_eq!(env["SPLAT3_DISCORD_PRESENCE"], "launcher");
         assert_eq!(spec.env.len(), 6);
@@ -431,11 +462,12 @@ mod tests {
         assert_eq!(env["TOTK_XLATE"], r"D:\tools\xlate.exe");
         assert_eq!(env["TOTK_LAN"], "lan");
         // a second instance: its own working directory, logs, caches and profile folder, same translator
-        assert_eq!(spec.cwd, Path::new(r"C:\w\r\userdata-p2"));
-        assert_eq!(env["TOTK_PROFILE_DIR"], r"C:\w\r\userdata-p2\profile");
-        assert_eq!(env["TOTK_SHADER_CACHE"], r"C:\w\r\userdata-p2\shader-cache");
-        assert_eq!(spec.args, vec!["--profile", r"C:\w\r\userdata-p2\profile"]);
-        assert!(spec.stderr_log.starts_with(r"C:\w\r\userdata-p2\logs"));
+        let ud = Path::new(r"C:\w\r\userdata-p2");
+        assert_eq!(spec.cwd, ud);
+        assert_eq!(env["TOTK_PROFILE_DIR"], shown(&ud.join("profile")));
+        assert_eq!(env["TOTK_SHADER_CACHE"], shown(&ud.join("shader-cache")));
+        assert_eq!(spec.args, vec!["--profile".to_string(), shown(&ud.join("profile"))]);
+        assert!(spec.stderr_log.starts_with(&ud.join("logs")));
         assert!(spec.env_remove.iter().any(|v| v == "SPLAT3_START") && spec.env_remove.iter().any(|v| v == "SPLAT3_LAN"));
         // every launch, the second player's too, keeps the game off Discord's pipe; an inherited test pipe name goes
         assert_eq!(env["SPLAT3_DISCORD_PRESENCE"], "launcher");

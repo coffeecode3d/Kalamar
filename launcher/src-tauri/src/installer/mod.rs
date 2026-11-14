@@ -44,6 +44,17 @@ use std::time::{Duration, Instant};
 
 pub const GAME_DIR: &str = "splatoon3-11.2.0";
 pub const TARGET: &str = "splatoon3-v1120";
+/// Executable suffix: `.exe` on Windows, nothing on Linux (`build_game.py` names the target's executable
+/// `splat3` + `.exe` only on Windows).
+pub const EXE_SUFFIX: &str = if cfg!(windows) { ".exe" } else { "" };
+pub const GAME_STEM: &str = "splat3";
+pub const XLATE_STEM: &str = "totk_xlate";
+pub const HACTOOL_STEM: &str = "hactool";
+
+/// A program's file name with the platform's suffix (`splat3` → `splat3.exe` on Windows, `splat3` on Linux).
+pub fn exe_name(stem: &str) -> String {
+    format!("{stem}{EXE_SUFFIX}")
+}
 pub const STATE_FILE: &str = "kalamar-install.json";
 pub const MNG_URL: &str = "https://github.com/ly05010419/MacNativeGames.git";
 pub const MNG_PIN: &str = "d1509b4b62211265fad5449cf53cc9f13484ecc5";
@@ -129,6 +140,8 @@ pub enum Toolchain {
     Portable,
     /// MSYS2 UCRT64 in `C:\msys64`: kept by an install whose objects were compiled with it, while it is complete.
     Msys2,
+    /// The system's clang, lld, Ninja and libraries (`clang`, `ld.lld`, `ninja`, SDL3, Opus, libvpx, zstd): Linux.
+    System,
 }
 
 impl Toolchain {
@@ -137,6 +150,7 @@ impl Toolchain {
         match self {
             Toolchain::Portable => portable::toolchain_id(),
             Toolchain::Msys2 => "msys2".into(),
+            Toolchain::System => "system".into(),
         }
     }
 }
@@ -169,8 +183,16 @@ impl Layout {
     pub fn venv(&self) -> PathBuf {
         self.work().join("venv")
     }
+    /// The Python of an older install's virtual environment (`work\venv\Scripts\python.exe`, `work/venv/bin/python3`).
     pub fn venv_py(&self) -> PathBuf {
-        self.venv().join("Scripts").join("python.exe")
+        #[cfg(windows)]
+        {
+            self.venv().join("Scripts").join("python.exe")
+        }
+        #[cfg(not(windows))]
+        {
+            self.venv().join("bin").join("python3")
+        }
     }
     /// The Python the steps run: the portable one in `tools\python` when it is there, else an older install's virtual
     /// environment.
@@ -181,13 +203,13 @@ impl Layout {
     pub fn tools(&self) -> PathBuf {
         portable::tools(&self.root)
     }
-    /// hactool as the launcher ships it (`prebuilt`), in `tools\bin`.
+    /// hactool, built (`build_hactool.py`) or shipped with the launcher (`prebuilt`), in `tools/bin`.
     pub fn hactool(&self) -> PathBuf {
-        portable::bin_dir(&self.root).join("hactool.exe")
+        portable::bin_dir(&self.root).join(exe_name(HACTOOL_STEM))
     }
     /// hactool as installs before the shipped one built it (`tools/build_hactool.py`).
     pub fn hactool_built(&self) -> PathBuf {
-        self.src().join("toolchain").join("hactool").join("hactool.exe")
+        self.src().join("toolchain").join("hactool").join(exe_name(HACTOOL_STEM))
     }
     pub fn kit_tools(&self) -> PathBuf {
         self.src().join("kit-tools")
@@ -208,7 +230,7 @@ impl Layout {
         self.game().join("build")
     }
     pub fn game_exe(&self) -> PathBuf {
-        self.build().join("splat3.exe")
+        self.build().join(exe_name(GAME_STEM))
     }
     pub fn userdata(&self) -> PathBuf {
         self.game().join("userdata")
@@ -217,7 +239,7 @@ impl Layout {
         self.work().join("xlate")
     }
     pub fn xlate_exe(&self) -> PathBuf {
-        self.xlate().join("totk_xlate.exe")
+        self.xlate().join(exe_name(XLATE_STEM))
     }
     pub fn nuget(&self) -> PathBuf {
         self.work().join("nuget")
@@ -522,6 +544,7 @@ enum Flow {
 }
 
 /// The work of a step run in a thread beside the others: it gets the stop flag and the step's progress.
+#[cfg(windows)]
 type BgWork = Box<dyn FnOnce(&AtomicBool, &Mutex<Prog>) -> StepResult + Send>;
 
 /// A step running beside the others.
@@ -803,8 +826,16 @@ impl Run {
     /// what the build needs (another compiler would recompile every object); anything else uses the portable toolchain.
     fn with_toolchain(mut self) -> Run {
         self.shipped = prebuilt::load(self.bundle_dir.as_deref());
-        let msys = self.state.toolchain == "msys2" || (self.state.toolchain.is_empty() && self.lay.built_with() == Some(Toolchain::Msys2));
-        self.toolchain = if msys && self.lay.objects_kept() && prereq::msys2_builds() { Toolchain::Msys2 } else { Toolchain::Portable };
+        #[cfg(windows)]
+        {
+            let msys = self.state.toolchain == "msys2" || (self.state.toolchain.is_empty() && self.lay.built_with() == Some(Toolchain::Msys2));
+            self.toolchain = if msys && self.lay.objects_kept() && prereq::msys2_builds() { Toolchain::Msys2 } else { Toolchain::Portable };
+        }
+        #[cfg(not(windows))]
+        {
+            // Linux builds with the system's clang/lld/ninja and libraries (engine/docs/building.md, "Linux").
+            self.toolchain = Toolchain::System;
+        }
         self
     }
 
@@ -871,7 +902,7 @@ impl Run {
     /// `Run::step_compile`).
     fn bg_before(&self, id: StepId) -> Option<StepId> {
         match id {
-            StepId::Prereqs if self.portable() => Some(StepId::Compile),
+            StepId::Prereqs => Some(StepId::Compile),
             StepId::Romfs => Some(StepId::Xlate),
             _ => None,
         }
@@ -991,6 +1022,7 @@ impl Run {
             match self.toolchain {
                 Toolchain::Portable => format!("portable ({}) in {}", portable::toolchain_id(), self.lay.tools().display()),
                 Toolchain::Msys2 => "MSYS2 UCRT64 (the objects in place were compiled with it)".into(),
+                Toolchain::System => "the system's clang, lld, Ninja and libraries (nothing downloaded)".into(),
             },
             match &self.shipped {
                 Some(t) => format!(", shipped hactool and translator (engine {})", &t.manifest.engine_commit[..t.manifest.engine_commit.len().min(12)]),
@@ -1382,7 +1414,7 @@ impl Run {
         let key = incremental::compile_key(&self.archive, TARGET, &self.lay.romfs_identity());
         // The compiler is an input too; MSYS2 builds keep the digest they were recorded with before it was.
         match self.toolchain {
-            Toolchain::Msys2 => key,
+            Toolchain::Msys2 | Toolchain::System => key,
             Toolchain::Portable => bundle::sha256_hex(format!("{key}\0{}", portable::toolchain_id()).as_bytes()),
         }
     }
@@ -1462,6 +1494,7 @@ impl Run {
             StepId::Prereqs => match self.toolchain {
                 Toolchain::Portable => portable::toolchain_ready(&l.root),
                 Toolchain::Msys2 => true,
+                Toolchain::System => prereq::system_ready(),
             },
             StepId::Sources => {
                 bundle::load_marker(&l.src()).is_some_and(|m| m == commit)
@@ -1516,9 +1549,12 @@ impl Run {
         if self.portable() {
             dirs.push(portable::bin_dir(&self.lay.root));
             dirs.push(portable::python_dir(&self.lay.root));
-        } else {
+        } else if cfg!(windows) {
             let msys = Path::new(prereq::MSYS_ROOT);
             dirs.extend([msys.join("ucrt64").join("bin"), msys.join("usr").join("bin")]);
+        } else {
+            // Linux: the install's own Python environment, then the system's tools.
+            dirs.push(self.lay.venv().join("bin"));
         }
         for t in ["git", "dotnet"] {
             if let Some(d) = self.tool_path(t).and_then(|p| p.parent().map(Path::to_path_buf)) {
@@ -1618,6 +1654,7 @@ impl Run {
 
     /// Runs `work` in a thread beside the next steps (the toolchain download). `work` gets the stop flag and the step's
     /// progress.
+    #[cfg(windows)]
     fn spawn_background_work(&mut self, id: StepId, work: BgWork) -> StepResult {
         let before = self.bg_before(id).unwrap_or(StepId::Layout);
         let halt = Arc::new(AtomicBool::new(self.cancelled()));
@@ -1908,6 +1945,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn layout_matches_the_kit() {
         let l = Layout::new(r"C:\I");
         assert_eq!(l.game(), Path::new(r"C:\I\work\splatoon3-11.2.0"));

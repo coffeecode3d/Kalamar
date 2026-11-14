@@ -433,10 +433,11 @@ function PlanView({ plan, req, agree, setAgree, advanced, onBack, onStart }: {
   // Install button is then the agreement.
   const ok = agree || !plan.needs_prereqs;
   const portable = plan.toolchain === "portable";
+  const system = plan.toolchain === "system";
   return (
     <div className="wiz-body">
       <h1 id="wiz-title" className="display wiz-title">{w("wiz.plan.title")}</h1>
-      <p className="wiz-lead">{w(portable ? "wiz.plan.lead2" : "wiz.plan.lead")}</p>
+      <p className="wiz-lead">{w(portable ? "wiz.plan.lead2" : system ? "wiz.plan.lead3" : "wiz.plan.lead")}</p>
       {plan.existing && (
         <div className="notice notice-ok"><IconCheck width="1.2em" height="1.2em" />
           <span>{w(plan.needs_files ? "wiz.plan.update.files" : "wiz.plan.update.nofiles")} {w("wiz.plan.update.safe")}</span>
@@ -482,7 +483,7 @@ function PlanView({ plan, req, agree, setAgree, advanced, onBack, onStart }: {
                 </li>
               ))}
             </ul>
-            {plan.missing_packages.length > 0 && <p className="hint">{w("wiz.plan.packages", { list: plan.missing_packages.join(", ") })}</p>}
+            {plan.missing_packages.length > 0 && <p className="hint">{w(system ? "wiz.plan.packages.system" : "wiz.plan.packages", { list: plan.missing_packages.join(", ") })}</p>}
             <ul className="wiz-list small">
               <li>{w("wiz.plan.disk.need2", { need: gb(plan.disk_needed, 1), free: gb(plan.disk_free), final: gb(plan.footprint, 1) })}</li>
               <li>{w("wiz.plan.ram", { ram: plan.ram == null ? "?" : Math.round(plan.ram / 2 ** 30), jobs: plan.jobs })}</li>

@@ -14,10 +14,10 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::Path;
 
-pub const ARCHIVE_NAME: &str = "kalamar-tools.tar.gz";
-pub const MANIFEST_NAME: &str = "kalamar-tools.json";
-pub const HACTOOL: &str = "bin/hactool.exe";
-pub const XLATE_EXE: &str = "xlate/totk_xlate.exe";
+pub const ARCHIVE_NAME: &str = if cfg!(windows) { "kalamar-tools.tar.gz" } else { "kalamar-tools-linux.tar.gz" };
+pub const MANIFEST_NAME: &str = if cfg!(windows) { "kalamar-tools.json" } else { "kalamar-tools-linux.json" };
+pub const HACTOOL: &str = if cfg!(windows) { "bin/hactool.exe" } else { "bin/hactool" };
+pub const XLATE_EXE: &str = if cfg!(windows) { "xlate/totk_xlate.exe" } else { "xlate/totk_xlate" };
 pub const XLATE_ID: &str = "xlate/totk_xlate.id";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -45,11 +45,23 @@ pub struct Tools {
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
+// Windows builds carry the two programs inside the executable (they are a few MB). The Linux build does not: the
+// release workflow builds them from the engine's sources and puts them in the bundle's resources folder, where
+// `load` finds them; without them the wizard builds both from source (`build_hactool.py`, `build_xlate.py`).
+#[cfg(windows)]
 static EMBEDDED_ARCHIVE: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/kalamar-tools.tar.gz"));
+#[cfg(windows)]
 static EMBEDDED_MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/kalamar-tools.json"));
 
 pub fn embedded() -> (&'static [u8], &'static [u8]) {
-    (EMBEDDED_ARCHIVE, EMBEDDED_MANIFEST)
+    #[cfg(windows)]
+    {
+        (EMBEDDED_ARCHIVE, EMBEDDED_MANIFEST)
+    }
+    #[cfg(not(windows))]
+    {
+        (&[], &[])
+    }
 }
 
 /// The archive and manifest, checked: the archive's SHA-256 is the manifest's and every file's is listed. `None` when
@@ -90,9 +102,19 @@ pub fn load(dir: Option<&Path>) -> Option<Tools> {
             parse(gz, m)
         })
         .clone();
+    #[cfg(not(windows))]
+    {
+        // Linux: the release's resource folder, built by the release workflow (engine tools/build_hactool.py,
+        // tools/build_xlate.py); a source build has none and the wizard builds both from source.
+        let Some(d) = dir else { return embedded };
+        let (Ok(gz), Ok(m)) = (std::fs::read(d.join(ARCHIVE_NAME)), std::fs::read(d.join(MANIFEST_NAME))) else { return embedded };
+        return parse(&gz, &m).or(embedded);
+    }
+    #[cfg(windows)]
     load_with(dir, embedded)
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn load_with(dir: Option<&Path>, embedded: Option<Tools>) -> Option<Tools> {
     let embedded = embedded?;
     if let Some(d) = dir
@@ -302,6 +324,7 @@ mod tests {
 
     /// What ships with the launcher is valid, carries both programs and their licenses, and its translator was built
     /// from the runtime source that ships beside it.
+    #[cfg(windows)]
     #[test]
     fn shipped_tools_match_the_shipped_source() {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");

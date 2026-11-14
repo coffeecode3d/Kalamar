@@ -111,6 +111,11 @@ fn setup(tag: &str) -> Setup {
     let old = std::fs::read(&me).unwrap();
     let exe = app.join("Kalamar.exe");
     std::fs::write(&exe, &old).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     // the "new" version: the same program with bytes appended (Windows ignores data after the sections), so its hash
     // differs and it still runs
     let mut new = old.clone();

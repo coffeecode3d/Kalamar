@@ -171,13 +171,19 @@ pub fn game_root_env() -> Option<PathBuf> {
     ["KALAMAR_GAME_ROOT", "SPLAT3_GAME_ROOT"].iter().find_map(|k| std::env::var_os(k).filter(|v| !v.is_empty())).map(PathBuf::from)
 }
 
-/// The current user's profile folder (`%USERPROFILE%`).
+/// The current user's profile folder (`%USERPROFILE%` on Windows, `$HOME` on Linux).
 pub fn user_profile() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE").filter(|v| !v.is_empty()).map(PathBuf::from)
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
 fn same_component(a: std::path::Component, b: std::path::Component) -> bool {
-    a.as_os_str().to_string_lossy().eq_ignore_ascii_case(&b.as_os_str().to_string_lossy())
+    // Windows paths compare ignoring ASCII case; Linux paths do not.
+    if cfg!(windows) {
+        a.as_os_str().to_string_lossy().eq_ignore_ascii_case(&b.as_os_str().to_string_lossy())
+    } else {
+        a == b
+    }
 }
 
 /// `path` is `dir` or lies under it (component by component, ignoring ASCII case, as Windows paths compare).
@@ -220,6 +226,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(windows)]
     fn game_folders_are_looked_for_inside_the_profile_only() {
         let home = Path::new(r"C:\Users\Someone");
         let got = ancestors_in_profile(Path::new(r"C:\Users\someone\Downloads\Kalamar.exe"), Some(home));
@@ -229,6 +236,22 @@ mod tests {
         assert!(ancestors_in_profile(Path::new(r"C:\Users\Someone2\x"), Some(home)).is_empty(), "another profile");
         assert!(ancestors_in_profile(Path::new(r"C:\Users\Someone\x"), None).is_empty());
         assert!(under(Path::new(r"\\?\C:\Users\Someone\a"), home) && !under(Path::new(r"C:\Users"), home));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn game_folders_are_looked_for_inside_the_profile_only() {
+        let home = Path::new("/home/someone");
+        let exe = home.join("Downloads").join("Kalamar");
+        let got = ancestors_in_profile(&exe, Some(home));
+        assert_eq!(got, [exe.clone(), home.join("Downloads"), home.to_path_buf()]);
+        assert!(!got.iter().any(|d| d == Path::new("/") || d == Path::new("/home")), "the root is never reached");
+        assert!(ancestors_in_profile(Path::new("/opt/Kalamar/Kalamar"), Some(home)).is_empty());
+        assert!(ancestors_in_profile(Path::new("/home/someone2/x"), Some(home)).is_empty(), "another profile");
+        assert!(ancestors_in_profile(&exe, None).is_empty());
+        assert!(under(&home.join("a"), home) && !under(Path::new("/home"), home));
+        // Paths are case-sensitive here: another spelling is another folder.
+        assert!(!under(Path::new("/home/Someone/a"), home));
     }
 
     #[test]

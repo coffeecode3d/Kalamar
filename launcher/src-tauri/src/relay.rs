@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-pub const EXE_NAME: &str = "splat3-relay.exe";
+pub const EXE_NAME: &str = if cfg!(windows) { "splat3-relay.exe" } else { "splat3-relay" };
 
 /// Where the relay binary is looked for when no path is configured: `relay\target\release\splat3-relay.exe` in a
 /// folder above the game root or the launcher.

@@ -587,6 +587,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn contract_2_rules_to_everyone_rounds_and_paths_per_round() {
         let d = Path::new(r"C:\d");
         let p = super::plan(&example2("join"), &v2()).unwrap();
@@ -646,6 +647,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn the_host_gets_the_rules_verbatim() {
         let p = plan(&example("host"), MODES).unwrap();
         assert_eq!((p.role, p.member_name.as_str(), p.players), (Role::Host, "Camille", 2));

@@ -298,6 +298,16 @@ pub fn prepare(staged: &Path, sha256: &str, size: u64, p: &Paths) -> Result<std:
         let _ = std::fs::remove_file(&p.new);
         return Err(io_err(&e));
     }
+    #[cfg(unix)]
+    {
+        // A downloaded program keeps the download's mode (no execute bit): the new version must be runnable.
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(staged).map(|m| m.permissions().mode()).unwrap_or(0o644);
+        if let Err(e) = std::fs::set_permissions(&p.new, std::fs::Permissions::from_mode(mode | 0o111)) {
+            let _ = std::fs::remove_file(&p.new);
+            return Err(io_err(&e));
+        }
+    }
     match verify_locked(&p.new, sha256, size, true) {
         Ok(guard) => Ok(guard),
         Err(e) => {
@@ -592,12 +602,22 @@ pub fn save_elsewhere(staged: &Path, sha256: &str, size: u64, dir: &Path, versio
         return Err(ApplyError::NotWritable("a temporary folder".into()));
     }
     verify_file(staged, sha256, size)?;
-    let target = [dir.join("Kalamar.exe"), dir.join(format!("Kalamar-{version}.exe"))].into_iter().find(|t| !t.exists()).ok_or_else(|| ApplyError::Busy("both names are taken".into()))?;
-    let tmp = dir.join(format!(".Kalamar-{version}.exe.part-{}", std::process::id()));
+    let name = crate::installer::exe_name("Kalamar");
+    let target = [dir.join(&name), dir.join(format!("Kalamar-{version}{}", crate::installer::EXE_SUFFIX))].into_iter().find(|t| !t.exists()).ok_or_else(|| ApplyError::Busy("both names are taken".into()))?;
+    let tmp = dir.join(format!(".Kalamar-{version}{}.part-{}", crate::installer::EXE_SUFFIX, std::process::id()));
     let copied = std::fs::copy(staged, &tmp).and_then(|_| std::fs::OpenOptions::new().write(true).open(&tmp)?.sync_all());
     if let Err(e) = copied {
         let _ = std::fs::remove_file(&tmp);
         return Err(io_err(&e));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(staged).map(|m| m.permissions().mode()).unwrap_or(0o644);
+        if let Err(e) = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode | 0o111)) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(io_err(&e));
+        }
     }
     if let Err(e) = verify_file(&tmp, sha256, size) {
         let _ = std::fs::remove_file(&tmp);
@@ -658,7 +678,22 @@ pub fn other_instances(exe: &Path) -> Vec<u32> {
         }
         found
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let me = std::process::id();
+        let want = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+        let mut found = Vec::new();
+        if let Ok(rd) = std::fs::read_dir("/proc") {
+            for e in rd.flatten() {
+                let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+                if pid != me && std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|p| p == want) {
+                    found.push(pid);
+                }
+            }
+        }
+        found
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = exe;
         Vec::new()
@@ -922,9 +957,9 @@ mod tests {
         let out = d.join("out");
         std::fs::create_dir_all(&out).unwrap();
         let first = save_elsewhere(&staged, &sha(b"new"), 3, &out, "0.2.0", &[]).unwrap();
-        assert_eq!(first, out.join("Kalamar.exe"));
+        assert_eq!(first, out.join(crate::installer::exe_name("Kalamar")));
         let second = save_elsewhere(&staged, &sha(b"new"), 3, &out, "0.2.0", &[]).unwrap();
-        assert_eq!(second, out.join("Kalamar-0.2.0.exe"));
+        assert_eq!(second, out.join(format!("Kalamar-0.2.0{}", crate::installer::EXE_SUFFIX)));
         assert!(matches!(save_elsewhere(&staged, &sha(b"new"), 3, &out, "0.2.0", &[]), Err(ApplyError::Busy(_))));
         assert_eq!(save_elsewhere(&staged, &sha(b"bad"), 3, &d, "0.2.0", &[]), Err(ApplyError::Integrity));
         assert!(matches!(save_elsewhere(&staged, &sha(b"new"), 3, &out, "0.2.0", std::slice::from_ref(&d)), Err(ApplyError::NotWritable(_))));

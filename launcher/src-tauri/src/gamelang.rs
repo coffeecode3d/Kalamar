@@ -298,8 +298,8 @@ lang =
         let other = d.join("fonts");
         let ini2 = IniDoc::parse(&format!("[paths]\nshared_fonts = {}\n", other.display()));
         assert_eq!(fonts_dir(&root, &ini2, no_env), other);
-        let from_env = |k: &str| (k == "TOTK_SHARED_FONTS").then(|| "C:\\fonts".to_string());
-        assert_eq!(fonts_dir(&root, &ini2, from_env), PathBuf::from("C:\\fonts"));
+        let from_env = |k: &str| (k == "TOTK_SHARED_FONTS").then(|| std::env::temp_dir().join("fonts-env").display().to_string());
+        assert_eq!(fonts_dir(&root, &ini2, from_env), std::env::temp_dir().join("fonts-env"));
         std::fs::remove_dir_all(&d).ok();
     }
 }

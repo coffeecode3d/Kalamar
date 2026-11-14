@@ -9,6 +9,7 @@ fn s(p: &Path) -> String {
 }
 
 /// A failure of the portable tools' download or unpacking, with the step's log.
+#[cfg(windows)]
 fn portable_fail(e: portable::Error, log: &Path) -> Fail {
     let f = match e {
         portable::Error::Cancelled => return Fail::cancelled(),
@@ -23,14 +24,17 @@ fn portable_fail(e: portable::Error, log: &Path) -> Fail {
 impl Run {
     // ---- A: checks --------------------------------------------------------------------------------------------
     pub(super) fn step_checks(&mut self) -> StepResult {
-        let arch = |v: &str| std::env::var(v).is_ok_and(|a| a.eq_ignore_ascii_case("ARM64"));
-        if arch("PROCESSOR_ARCHITECTURE") || arch("PROCESSOR_ARCHITEW6432") {
-            return Err(Fail::new("arm64"));
+        #[cfg(windows)]
+        {
+            let arch = |v: &str| std::env::var(v).is_ok_and(|a| a.eq_ignore_ascii_case("ARM64"));
+            if arch("PROCESSOR_ARCHITECTURE") || arch("PROCESSOR_ARCHITEW6432") {
+                return Err(Fail::new("arm64"));
+            }
         }
         if !sys::cpu_has_v3() {
             return Err(Fail::new("cpu_v3"));
         }
-        let mut warnings = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
         if !needs_player_files(&self.lay) {
             // An existing install (the wizard's or the pre-release installer's) already holds the extracted ExeFS and the merged RomFS:
             // nothing needs the player's dumps or keys again.
@@ -81,9 +85,21 @@ impl Run {
         if ram > 0 && ram < (16u64 << 30) - (512 << 20) {
             warnings.push("ram_low".into());
         }
-        let sysroot = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-        if !sysroot.join("System32").join("vulkan-1.dll").is_file() {
-            warnings.push("vulkan_missing".into());
+        #[cfg(windows)]
+        {
+            let sysroot = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+            if !sysroot.join("System32").join("vulkan-1.dll").is_file() {
+                warnings.push("vulkan_missing".into());
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            // The loader is what the game dlopens; without it nothing renders (engine/docs/building.md, "Linux").
+            let known = ["/usr/lib/libvulkan.so.1", "/usr/lib/x86_64-linux-gnu/libvulkan.so.1", "/usr/lib64/libvulkan.so.1"].iter().any(|p| Path::new(p).exists());
+            let ldconfig = std::process::Command::new("ldconfig").arg("-p").output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("libvulkan.so.1"));
+            if !known && !ldconfig {
+                warnings.push("vulkan_missing".into());
+            }
         }
         // Outside the profile, a new folder takes its parent's permissions: on most drives every account of the PC may
         // change the programs the launcher later runs from it. Said, not refused.
@@ -102,44 +118,59 @@ impl Run {
             self.log("    MSYS2 UCRT64 stays the compiler of this install (its objects were compiled with it)");
             return Ok(Flow::Skipped);
         }
-        if portable::toolchain_ready(&self.lay.root) {
-            return Ok(Flow::Skipped);
+        #[cfg(not(windows))]
+        {
+            // Linux builds with the system's clang, lld, Ninja, Python and libraries: nothing is downloaded into the
+            // install folder, and nothing is installed without the player's own package manager (the plan lists what
+            // is missing, engine/docs/building.md "Linux").
+            let missing = prereq::system_missing();
+            if missing.is_empty() {
+                self.log("    the system's clang, lld, Ninja and libraries are there (nothing to download)");
+                return Ok(Flow::Skipped);
+            }
+            return Err(Fail::new("linux_tools_missing").with("list", prereq::missing_packages().join(", ")));
         }
-        self.check_space(StepId::Prereqs)?;
-        let root = self.lay.root.clone();
-        let log = self.lay.logs().join("outils.log");
-        let total = portable::bytes(&portable::TOOLCHAIN);
-        self.log(&format!("    downloading llvm-mingw {}, Ninja and the libraries ({:.0} MB) into {}, beside the next steps", portable::LLVM_VERSION, total as f64 / 1e6, self.lay.tools().display()));
-        self.spawn_background_work(
-            StepId::Prereqs,
-            Box::new(move |halt, prog| {
-                let mut lf = std::fs::OpenOptions::new().create(true).append(true).open(&log).ok();
-                let mut note = |line: &str| {
-                    if let Some(f) = lf.as_mut() {
-                        let _ = writeln!(f, "[{}] {line}", now_stamp());
+        #[cfg(windows)]
+        {
+            if portable::toolchain_ready(&self.lay.root) {
+                return Ok(Flow::Skipped);
+            }
+            self.check_space(StepId::Prereqs)?;
+            let root = self.lay.root.clone();
+            let log = self.lay.logs().join("outils.log");
+            let total = portable::bytes(&portable::TOOLCHAIN);
+            self.log(&format!("    downloading llvm-mingw {}, Ninja and the libraries ({:.0} MB) into {}, beside the next steps", portable::LLVM_VERSION, total as f64 / 1e6, self.lay.tools().display()));
+            self.spawn_background_work(
+                StepId::Prereqs,
+                Box::new(move |halt, prog| {
+                    let mut lf = std::fs::OpenOptions::new().create(true).append(true).open(&log).ok();
+                    let mut note = |line: &str| {
+                        if let Some(f) = lf.as_mut() {
+                            let _ = writeln!(f, "[{}] {line}", now_stamp());
+                        }
+                    };
+                    for p in portable::TOOLCHAIN {
+                        note(&format!("pinned {} ({} bytes, sha256 {}) from {}", p.name, p.size, p.sha256, p.url));
                     }
-                };
-                for p in portable::TOOLCHAIN {
-                    note(&format!("pinned {} ({} bytes, sha256 {}) from {}", p.name, p.size, p.sha256, p.url));
-                }
-                let t = Instant::now();
-                let mut last_stage = String::new();
-                let r = portable::ensure_toolchain(&root, halt, &mut |stage, f, bytes| {
-                    let mut p = prog.lock().unwrap_or_else(|e| e.into_inner());
-                    p.fraction = Some(f);
-                    p.stage = Some(stage.to_string());
-                    p.detail = bytes.map(|(d, t)| format!("{:.0}/{:.0}", d as f64 / 1e6, t as f64 / 1e6));
-                    if stage != last_stage {
-                        last_stage = stage.to_string();
+                    let t = Instant::now();
+                    let mut last_stage = String::new();
+                    let r = portable::ensure_toolchain(&root, halt, &mut |stage, f, bytes| {
+                        let mut p = prog.lock().unwrap_or_else(|e| e.into_inner());
+                        p.fraction = Some(f);
+                        p.stage = Some(stage.to_string());
+                        p.detail = bytes.map(|(d, t)| format!("{:.0}/{:.0}", d as f64 / 1e6, t as f64 / 1e6));
+                        if stage != last_stage {
+                            last_stage = stage.to_string();
+                        }
+                    });
+                    match &r {
+                        Ok(_) => note(&format!("toolchain ready in {:.1} s: {}", t.elapsed().as_secs_f64(), portable::toolchain_id())),
+                        Err(e) => note(&format!("failed after {:.1} s: {e}", t.elapsed().as_secs_f64())),
                     }
-                });
-                match &r {
-                    Ok(_) => note(&format!("toolchain ready in {:.1} s: {}", t.elapsed().as_secs_f64(), portable::toolchain_id())),
-                    Err(e) => note(&format!("failed after {:.1} s: {e}", t.elapsed().as_secs_f64())),
-                }
-                r.map(|did| if did { Flow::Done } else { Flow::Skipped }).map_err(|e| portable_fail(e, &log))
-            }),
-        )
+                    r.map(|did| if did { Flow::Done } else { Flow::Skipped }).map_err(|e| portable_fail(e, &log))
+                }),
+            )
+        }
     }
 
     // ---- B2: sources ------------------------------------------------------------------------------------------
@@ -188,34 +219,78 @@ impl Run {
     pub(super) fn step_python(&mut self) -> StepResult {
         let ready = |p: &Path| p.is_file() && prereq::run_capture(p, &["-I", "-c", "import cryptography, numpy, lz4.block"], Duration::from_secs(60)).is_some_and(|(c, _)| c == 0);
         let root = self.lay.root.clone();
-        let portable_py = portable::python_exe(&root);
-        if portable::python_ready(&root) && ready(&portable_py) {
-            return Ok(Flow::Skipped);
-        }
-        if !portable::python_ready(&root) && ready(&self.lay.venv_py()) {
-            self.log("    the Python environment of this install (work\\venv) is kept");
-            return Ok(Flow::Skipped);
-        }
-        self.check_space(StepId::Python)?;
-        let log = self.lay.logs().join("python.log");
-        let mut lf = std::fs::OpenOptions::new().create(true).append(true).open(&log).ok();
-        for p in portable::python_pins() {
-            if let Some(f) = lf.as_mut() {
-                let _ = writeln!(f, "[{}] pinned {} ({} bytes, sha256 {}) from {}", now_stamp(), p.name, p.size, p.sha256, p.url);
+        #[cfg(not(windows))]
+        {
+            // The system's python3 builds a virtual environment in the install folder: nothing is installed outside it.
+            let venv = self.lay.venv();
+            let vpy = self.lay.venv_py();
+            if ready(&vpy) {
+                return Ok(Flow::Skipped);
             }
+            let Some(base) = prereq::find_python_system() else { return Err(Fail::new("linux_python_missing")) };
+            self.check_space(StepId::Python)?;
+            if !vpy.is_file() {
+                self.progress(StepId::Python, Some(0.1), Some("venv".into()), None);
+                let args: Vec<String> = vec!["-m".into(), "venv".into(), s(&venv), "--clear".into()];
+                self.exec_ok(StepId::Python, &base, &args, &root, "python", &mut |_, _| {})?;
+            }
+            let req = self.lay.src().join("tools").join("requirements-installer.txt");
+            if !req.is_file() {
+                return Err(Fail::io("requirements-installer.txt", std::io::Error::from(std::io::ErrorKind::NotFound)));
+            }
+            self.progress(StepId::Python, Some(0.4), Some("pip".into()), None);
+            let args = vec![
+                "-m".into(),
+                "pip".into(),
+                "install".into(),
+                "--no-compile".into(),
+                "--disable-pip-version-check".into(),
+                "--only-binary".into(),
+                ":all:".into(),
+                "-r".into(),
+                s(&req),
+            ];
+            match self.exec(StepId::Python, &vpy, &args, &root, "python", false, &mut |_, _| {}, &mut |_| {}) {
+                Ok(0) => {}
+                _ => return Err(self.fail_log("python_env", "python")),
+            }
+            if !ready(&vpy) {
+                return Err(self.fail_log("python_env", "python"));
+            }
+            self.log("    Python environment ready (system python3, packages installed in work/venv)");
+            return Ok(Flow::Done);
         }
-        let cancel = self.inst.cancel.clone();
-        let r = portable::ensure_python(&root, &cancel, &mut |stage, f, bytes| {
-            self.progress(StepId::Python, Some(f), Some(stage.to_string()), bytes.map(|(d, t)| format!("{:.0}/{:.0}", d as f64 / 1e6, t as f64 / 1e6)));
-        });
-        if let Some(f) = lf.as_mut() {
-            let _ = writeln!(f, "[{}] {}", now_stamp(), match &r { Ok(_) => format!("ready: {}", portable::python_id()), Err(e) => format!("failed: {e}") });
+        #[cfg(windows)]
+        {
+            let portable_py = portable::python_exe(&root);
+            if portable::python_ready(&root) && ready(&portable_py) {
+                return Ok(Flow::Skipped);
+            }
+            if !portable::python_ready(&root) && ready(&self.lay.venv_py()) {
+                self.log("    the Python environment of this install (work\\venv) is kept");
+                return Ok(Flow::Skipped);
+            }
+            self.check_space(StepId::Python)?;
+            let log = self.lay.logs().join("python.log");
+            let mut lf = std::fs::OpenOptions::new().create(true).append(true).open(&log).ok();
+            for p in portable::python_pins() {
+                if let Some(f) = lf.as_mut() {
+                    let _ = writeln!(f, "[{}] pinned {} ({} bytes, sha256 {}) from {}", now_stamp(), p.name, p.size, p.sha256, p.url);
+                }
+            }
+            let cancel = self.inst.cancel.clone();
+            let r = portable::ensure_python(&root, &cancel, &mut |stage, f, bytes| {
+                self.progress(StepId::Python, Some(f), Some(stage.to_string()), bytes.map(|(d, t)| format!("{:.0}/{:.0}", d as f64 / 1e6, t as f64 / 1e6)));
+            });
+            if let Some(f) = lf.as_mut() {
+                let _ = writeln!(f, "[{}] {}", now_stamp(), match &r { Ok(_) => format!("ready: {}", portable::python_id()), Err(e) => format!("failed: {e}") });
+            }
+            r.map_err(|e| portable_fail(e, &log))?;
+            if !ready(&portable_py) {
+                return Err(self.fail_log("python_env", "python"));
+            }
+            Ok(Flow::Done)
         }
-        r.map_err(|e| portable_fail(e, &log))?;
-        if !ready(&portable_py) {
-            return Err(self.fail_log("python_env", "python"));
-        }
-        Ok(Flow::Done)
     }
 
     // ---- D: ExeFS and the version check -----------------------------------------------------------------------
@@ -411,7 +486,7 @@ impl Run {
             return Err(Fail::new("toolchain_missing"));
         }
         let mut args: Vec<String> = vec![
-            r"tools\build_game.py".into(),
+            s(&self.lay.src().join("tools").join("build_game.py")),
             "--version".into(),
             TARGET.into(),
             "--gen".into(),
@@ -578,7 +653,11 @@ impl Run {
         }
         // Otherwise built here, the old way: needs Git, the .NET 10 SDK and the Visual Studio C++ build tools.
         let Some(git) = self.tool_path("git").or_else(prereq::find_git) else { return Err(Fail::new("xlate_tools_missing")) };
-        if prereq::find_dotnet().is_none() || prereq::find_vs_cpp().is_none() {
+        if prereq::find_dotnet().is_none() {
+            return Err(Fail::new("xlate_tools_missing"));
+        }
+        #[cfg(windows)]
+        if prereq::find_vs_cpp().is_none() {
             return Err(Fail::new("xlate_tools_missing"));
         }
         let mng = self.lay.mng();
@@ -613,7 +692,7 @@ impl Run {
             } else if l.contains("Generating native code") {
                 p.fraction = Some(0.75);
                 p.stage = Some("native".into());
-            } else if l.contains(".dll") && l.contains("->") {
+            } else if (l.contains(".dll") || l.contains(".so")) && l.contains("->") {
                 p.fraction = Some(p.fraction.unwrap_or(0.4).max(0.6));
             }
         })?;
@@ -835,7 +914,7 @@ fn previous_mark(lay: &Layout) -> (String, String) {
 /// (`build-previous` stays the version before). `Some(true)` / `Some(false)` for those, `None` when there was nothing.
 pub fn settle_previous(lay: &Layout) -> Option<bool> {
     let new = previous_new(lay);
-    let kept = new.join("splat3.exe");
+    let kept = new.join(exe_name(GAME_STEM));
     if !kept.is_file() {
         let _ = sys::remove_all(&new);
         return None;
@@ -856,8 +935,17 @@ pub fn settle_previous(lay: &Layout) -> Option<bool> {
 }
 
 fn dlls(dir: &Path) -> Vec<PathBuf> {
+    // What the game loads beside its executable: the DLLs on Windows, the shared objects on Linux (`libSDL3.so.0`).
     std::fs::read_dir(dir)
-        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dll"))).collect())
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    let name = p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+                    name.ends_with(".dll") || (name.starts_with("lib") && name.contains(".so"))
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -872,7 +960,7 @@ impl Run {
         let new = previous_new(&self.lay);
         sys::remove_all(&new).map_err(|e| Fail::io("build-previous", e))?;
         std::fs::create_dir_all(&new).map_err(|e| Fail::io("build-previous", e))?;
-        let (exe, kept) = (self.lay.game_exe(), new.join("splat3.exe"));
+        let (exe, kept) = (self.lay.game_exe(), new.join(exe_name(GAME_STEM)));
         if std::fs::hard_link(&exe, &kept).is_err() {
             std::fs::copy(&exe, &kept).map_err(|e| Fail::io("build-previous", e))?;
         }
@@ -892,7 +980,7 @@ impl Run {
         let prev = self.lay.xlate().join("previous");
         sys::remove_all(&prev).map_err(|e| Fail::io("xlate previous", e))?;
         std::fs::create_dir_all(&prev).map_err(|e| Fail::io("xlate previous", e))?;
-        for n in ["totk_xlate.exe", "totk_xlate.id"] {
+        for n in &[exe_name(XLATE_STEM), "totk_xlate.id".to_string()] {
             let p = self.lay.xlate().join(n);
             if p.is_file() {
                 std::fs::rename(&p, prev.join(n)).map_err(|e| Fail::io("xlate previous", e))?;
@@ -907,9 +995,9 @@ impl Run {
     pub(super) fn restore_previous(&mut self) {
         if self.swapped {
             let prev = previous_dir(&self.lay);
-            if prev.join("splat3.exe").is_file() {
+            if prev.join(exe_name(GAME_STEM)).is_file() {
                 let _ = std::fs::remove_file(self.lay.game_exe());
-                if std::fs::rename(prev.join("splat3.exe"), self.lay.game_exe()).is_ok() {
+                if std::fs::rename(prev.join(exe_name(GAME_STEM)), self.lay.game_exe()).is_ok() {
                     for d in dlls(&prev) {
                         if let Some(n) = d.file_name() {
                             let _ = std::fs::copy(&d, self.lay.build().join(n));
@@ -923,7 +1011,7 @@ impl Run {
         }
         if self.xlate_swapped {
             let prev = self.lay.xlate().join("previous");
-            for n in ["totk_xlate.exe", "totk_xlate.id"] {
+            for n in &[exe_name(XLATE_STEM), "totk_xlate.id".to_string()] {
                 if prev.join(n).is_file() {
                     let _ = std::fs::remove_file(self.lay.xlate().join(n));
                     let _ = std::fs::rename(prev.join(n), self.lay.xlate().join(n));
@@ -951,7 +1039,7 @@ pub fn recover_interrupted(root: &Path) -> Vec<String> {
     if settle_previous(&lay) == Some(true) {
         done.push("previous game executable kept in build-previous".into());
     }
-    let prev = previous_dir(&lay).join("splat3.exe");
+    let prev = previous_dir(&lay).join(exe_name(GAME_STEM));
     if prev.is_file() && !lay.game_exe().is_file() && std::fs::rename(&prev, lay.game_exe()).is_ok() {
         for d in dlls(&previous_dir(&lay)) {
             if let Some(n) = d.file_name() {
@@ -985,7 +1073,7 @@ fn swap_files(a: &Path, b: &Path) -> std::io::Result<()> {
 pub fn rollback(root: &Path) -> Result<RollbackReport, String> {
     let lay = Layout::new(root);
     let prev = previous_dir(&lay);
-    if !prev.join("splat3.exe").is_file() {
+    if !prev.join(exe_name(GAME_STEM)).is_file() {
         return Err("no_previous".into());
     }
     let mut state = StateFile::load(&lay.state()).unwrap_or_default();
@@ -993,9 +1081,9 @@ pub fn rollback(root: &Path) -> Result<RollbackReport, String> {
     let prev_commit = mark.get("commit").and_then(|v| v.as_str()).unwrap_or("kit").to_string();
     let prev_xlate = mark.get("xlate_inputs").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if lay.game_exe().is_file() {
-        swap_files(&lay.game_exe(), &prev.join("splat3.exe")).map_err(|e| e.to_string())?;
+        swap_files(&lay.game_exe(), &prev.join(exe_name(GAME_STEM))).map_err(|e| e.to_string())?;
     } else {
-        std::fs::rename(prev.join("splat3.exe"), lay.game_exe()).map_err(|e| e.to_string())?;
+        std::fs::rename(prev.join(exe_name(GAME_STEM)), lay.game_exe()).map_err(|e| e.to_string())?;
     }
     for d in dlls(&prev) {
         if let Some(n) = d.file_name() {
@@ -1007,8 +1095,8 @@ pub fn rollback(root: &Path) -> Result<RollbackReport, String> {
     }
     let xprev = lay.xlate().join("previous");
     let mut xlate_now = state.xlate_inputs.clone();
-    if xprev.join("totk_xlate.exe").is_file() {
-        for n in ["totk_xlate.exe", "totk_xlate.id"] {
+    if xprev.join(exe_name(XLATE_STEM)).is_file() {
+        for n in &[exe_name(XLATE_STEM), "totk_xlate.id".to_string()] {
             let (cur, old) = (lay.xlate().join(n), xprev.join(n));
             if cur.is_file() && old.is_file() {
                 let _ = swap_files(&cur, &old);
@@ -1094,7 +1182,7 @@ pub fn find_existing(cands: &[PathBuf]) -> Vec<Existing> {
             source,
             launcher_data: Some(root.join("launcher-data")).filter(|p| p.is_dir()).map(|p| p.display().to_string()),
             needs_files: needs_player_files(&lay),
-            previous: previous_dir(&lay).join("splat3.exe").is_file(),
+            previous: previous_dir(&lay).join(exe_name(GAME_STEM)).is_file(),
             saves: crate::install::save_dir(&lay.game()).is_dir(),
         });
     }
@@ -1351,11 +1439,16 @@ pub fn plan(req: &InstallRequest, bundle_dir: Option<&Path>) -> Plan {
     let jobs = run.jobs;
     let (steps, eta, eta_max) = planned_steps(&run, &commit);
     let done = |id: StepId| steps.iter().any(|p| p.id == id && p.done);
-    // What is downloaded, from where: the portable tools (official sources, pinned SHA-256). hactool and the shader
-    // translator come with the launcher.
-    let names = |pins: &[portable::Pin]| pins.iter().map(|p| p.name.to_string()).collect::<Vec<_>>();
+    // What is downloaded, from where: the portable tools (official sources, pinned SHA-256) on Windows; the system's
+    // package manager on Linux, where the launcher installs nothing by itself. hactool and the shader translator come
+    // with the launcher when it carries them.
     let python_needed = !done(StepId::Python);
+    #[cfg(windows)]
+    let names = |pins: &[portable::Pin]| pins.iter().map(|p| p.name.to_string()).collect::<Vec<_>>();
+    #[cfg(windows)]
     let tools_needed = run.portable() && !done(StepId::Prereqs);
+    let shipped = run.shipped.as_ref();
+    #[cfg(windows)]
     let mut downloads: Vec<Download> = portable::download_groups()
         .into_iter()
         .map(|(id, source, bytes)| {
@@ -1370,11 +1463,28 @@ pub fn plan(req: &InstallRequest, bundle_dir: Option<&Path>) -> Plan {
             Download { id, source, items, needed, bytes }
         })
         .collect();
-    let shipped = run.shipped.as_ref();
+    #[cfg(not(windows))]
+    let mut downloads: Vec<Download> = vec![
+        Download {
+            id: "pypi",
+            source: "https://pypi.org (PyPI, the versions of tools/requirements-installer.txt)".into(),
+            items: vec!["numpy".into(), "lz4".into(), "cryptography".into(), "cffi".into(), "pycparser".into(), "fonttools".into()],
+            needed: python_needed,
+            bytes: 0,
+        },
+        Download {
+            id: "system",
+            source: "the system's package manager (nothing is installed by the launcher)".into(),
+            items: prereq::system_missing().iter().map(|id| id.to_string()).collect(),
+            needed: !prereq::system_ready(),
+            bytes: 0,
+        },
+    ];
+    let _ = python_needed;
     downloads.push(Download {
         id: "shipped",
         source: shipped.map(|t| format!("Kalamar (engine {})", &t.manifest.engine_commit[..t.manifest.engine_commit.len().min(7)])).unwrap_or_default(),
-        items: vec!["hactool.exe".into(), "totk_xlate.exe".into()],
+        items: vec![exe_name(HACTOOL_STEM), exe_name(XLATE_STEM)],
         needed: shipped.is_some() && (!done(StepId::Hactool) || !done(StepId::Xlate)),
         bytes: 0,
     });
@@ -1384,7 +1494,10 @@ pub fn plan(req: &InstallRequest, bundle_dir: Option<&Path>) -> Plan {
     let uses = run.space_steps(StepId::Prereqs);
     let disk_needed = space::needs(&uses).first().map_or(space::MARGIN, |n| n.1);
     let disk_peak_step = space::peak_step(&uses);
+    #[cfg(windows)]
     let tools = if run.portable() { Vec::new() } else { vec![prereq::Tool { id: "msys2", winget: prereq::WINGET_MSYS2, path: Some(prereq::msys_bash().display().to_string()) }] };
+    #[cfg(not(windows))]
+    let tools = prereq::detect().tools;
     Plan {
         install_dir: lay.root.display().to_string(),
         game_root: lay.game().display().to_string(),
@@ -1496,6 +1609,11 @@ pub fn uninstall(root: &Path, remove_saves: bool) -> Result<UninstallReport, Str
 mod tests {
     use super::*;
 
+    /// The runtime library a game build copies beside its executable.
+    fn test_lib() -> &'static str {
+        if cfg!(windows) { "SDL3.dll" } else { "libSDL3.so.0" }
+    }
+
     /// An install folder outside the profile is said (its permissions come from its parent).
     #[test]
     fn an_install_folder_outside_the_profile_is_flagged() {
@@ -1529,7 +1647,7 @@ mod tests {
         touch(&lay.src().join("recomp").join("gen.py"));
         touch(&lay.userdata().join("profile").join("save").join("u").join("save.dat"));
         touch(&lay.logs().join("lift.log"));
-        touch(&lay.game().join(PREVIOUS_DIR).join("splat3.exe"));
+        touch(&lay.game().join(PREVIOUS_DIR).join(exe_name(GAME_STEM)));
         touch(&lay.lift().join("main").join("main_0000.c"));
         // something the wizard did not make, in the same folders
         touch(&root.join("Jouer.cmd"));
@@ -1613,13 +1731,13 @@ mod tests {
         // killed during the merge: its temporary copy (with a derived key file) is left in the game folder
         touch(&lay.game().join("update-merge-abc").join("hactool.keys"));
         // killed during an update's compile: the previous executable is in build-previous, none in build
-        touch(&lay.game().join(PREVIOUS_DIR).join("splat3.exe"));
-        touch(&lay.game().join(PREVIOUS_DIR).join("SDL3.dll"));
+        touch(&lay.game().join(PREVIOUS_DIR).join(exe_name(GAME_STEM)));
+        touch(&lay.game().join(PREVIOUS_DIR).join(test_lib()));
         std::fs::create_dir_all(lay.build()).unwrap();
         let done = recover_interrupted(&root);
         assert_eq!(done.len(), 2, "{done:?}");
         assert!(lay.merge_temps().is_empty());
-        assert!(lay.game_exe().is_file() && lay.build().join("SDL3.dll").is_file());
+        assert!(lay.game_exe().is_file() && lay.build().join(test_lib()).is_file());
         assert!(!lay.game().join(PREVIOUS_DIR).exists());
         // nothing to do the second time
         assert!(recover_interrupted(&root).is_empty());
@@ -1650,11 +1768,11 @@ mod tests {
         assert_eq!(rollback(&root).unwrap_err(), "no_previous");
         std::fs::create_dir_all(lay.build()).unwrap();
         std::fs::write(lay.game_exe(), b"new").unwrap();
-        std::fs::write(lay.build().join("SDL3.dll"), b"dll-new").unwrap();
+        std::fs::write(lay.build().join(test_lib()), b"dll-new").unwrap();
         let prev = lay.game().join(PREVIOUS_DIR);
         std::fs::create_dir_all(&prev).unwrap();
-        std::fs::write(prev.join("splat3.exe"), b"old").unwrap();
-        std::fs::write(prev.join("SDL3.dll"), b"dll-old").unwrap();
+        std::fs::write(prev.join(exe_name(GAME_STEM)), b"old").unwrap();
+        std::fs::write(prev.join(test_lib()), b"dll-old").unwrap();
         std::fs::write(prev.join(PREVIOUS_MARK), r#"{"commit":"kit"}"#).unwrap();
         let mut st = StateFile::default();
         st.steps.insert("compile".into(), StepRecord { status: "done".into(), commit: "a105da5".into(), ..Default::default() });
@@ -1662,7 +1780,7 @@ mod tests {
         let r = rollback(&root).unwrap();
         assert_eq!((r.now.as_str(), r.previous.as_str()), ("kit", "a105da5"));
         assert_eq!(std::fs::read(lay.game_exe()).unwrap(), b"old");
-        assert_eq!(std::fs::read(lay.build().join("SDL3.dll")).unwrap(), b"dll-old");
+        assert_eq!(std::fs::read(lay.build().join(test_lib())).unwrap(), b"dll-old");
         // the next update rebuilds: the compile record is the old one
         assert!(!StateFile::load(&lay.state()).unwrap().done_with(StepId::Compile, "a105da5"));
         let r2 = rollback(&root).unwrap();
@@ -1806,33 +1924,33 @@ mod tests {
         let lay = Layout::new(&root);
         std::fs::create_dir_all(lay.build()).unwrap();
         std::fs::write(lay.game_exe(), b"v1").unwrap();
-        std::fs::write(lay.build().join("SDL3.dll"), b"dll").unwrap();
+        std::fs::write(lay.build().join(test_lib()), b"dll").unwrap();
         let req = InstallRequest { install_dir: root.display().to_string(), ..Default::default() };
         let mut run = dry_run(&req, None);
         // Nothing relinked: both names are one file, nothing is kept.
         run.prepare_previous().unwrap();
-        assert!(previous_new(&lay).join("splat3.exe").is_file() && previous_new(&lay).join("SDL3.dll").is_file());
+        assert!(previous_new(&lay).join(exe_name(GAME_STEM)).is_file() && previous_new(&lay).join(test_lib()).is_file());
         assert_eq!(settle_previous(&lay), Some(false));
         assert!(!previous_new(&lay).exists() && !previous_dir(&lay).exists());
         assert_eq!(std::fs::read(lay.game_exe()).unwrap(), b"v1");
         // Relinked the way the linker does it: a new file renamed over the old name.
         run.prepare_previous().unwrap();
-        std::fs::write(lay.build().join("splat3.exe.tmp"), b"v2-new").unwrap();
-        std::fs::rename(lay.build().join("splat3.exe.tmp"), lay.game_exe()).unwrap();
+        std::fs::write(lay.build().join(format!("{}.tmp", exe_name(GAME_STEM))), b"v2-new").unwrap();
+        std::fs::rename(lay.build().join(format!("{}.tmp", exe_name(GAME_STEM))), lay.game_exe()).unwrap();
         assert_eq!(settle_previous(&lay), Some(true));
-        assert_eq!(std::fs::read(previous_dir(&lay).join("splat3.exe")).unwrap(), b"v1");
+        assert_eq!(std::fs::read(previous_dir(&lay).join(exe_name(GAME_STEM))).unwrap(), b"v1");
         assert_eq!(std::fs::read(lay.game_exe()).unwrap(), b"v2-new");
         assert!(!previous_new(&lay).exists());
         // An update that found nothing to relink keeps the version before as the rollback.
         run.prepare_previous().unwrap();
         assert_eq!(settle_previous(&lay), Some(false));
-        assert_eq!(std::fs::read(previous_dir(&lay).join("splat3.exe")).unwrap(), b"v1");
+        assert_eq!(std::fs::read(previous_dir(&lay).join(exe_name(GAME_STEM))).unwrap(), b"v1");
         // A compile interrupted after its link is settled at the next start.
         run.prepare_previous().unwrap();
-        std::fs::write(lay.build().join("splat3.exe.tmp"), b"v3-newer").unwrap();
-        std::fs::rename(lay.build().join("splat3.exe.tmp"), lay.game_exe()).unwrap();
+        std::fs::write(lay.build().join(format!("{}.tmp", exe_name(GAME_STEM))), b"v3-newer").unwrap();
+        std::fs::rename(lay.build().join(format!("{}.tmp", exe_name(GAME_STEM))), lay.game_exe()).unwrap();
         assert_eq!(recover_interrupted(&root), vec!["previous game executable kept in build-previous".to_string()]);
-        assert_eq!(std::fs::read(previous_dir(&lay).join("splat3.exe")).unwrap(), b"v2-new");
+        assert_eq!(std::fs::read(previous_dir(&lay).join(exe_name(GAME_STEM))).unwrap(), b"v2-new");
         // The rollback swaps them.
         rollback(&root).unwrap();
         assert_eq!(std::fs::read(lay.game_exe()).unwrap(), b"v2-new");
@@ -1867,11 +1985,23 @@ mod tests {
         let root = std::env::temp_dir().join(format!("s3l-plan-{}", crate::util::random_hex(4)));
         let p = plan(&InstallRequest { install_dir: root.display().to_string(), ..Default::default() }, None);
         let ids: Vec<&str> = p.downloads.iter().map(|d| d.id).collect();
-        assert_eq!(ids, ["python", "pypi", "llvm", "ninja", "sdl3", "msys2", "shipped"]);
+        #[cfg(windows)]
+        {
+            assert_eq!(ids, ["python", "pypi", "llvm", "ninja", "sdl3", "msys2", "shipped"]);
+            // nothing on the system: no administrator, no agreement for system tools, everything in the folder
+            assert!(!p.needs_admin && !p.needs_prereqs && p.tools.is_empty() && p.toolchain == Toolchain::Portable);
+            assert_eq!(p.download_bytes, portable::bytes(&portable::all_pins()));
+        }
+        #[cfg(not(windows))]
+        {
+            // Linux: the packages of the system's manager (listed, never installed by the launcher) and the Python
+            // environment's wheels; nothing downloaded into the install folder.
+            assert_eq!(ids, ["pypi", "system", "shipped"]);
+            assert!(!p.needs_admin && !p.needs_prereqs && p.toolchain == Toolchain::System);
+            assert!(!p.tools.is_empty());
+            assert_eq!(p.download_bytes, 0);
+        }
         assert!(p.downloads.iter().find(|d| d.id == "pypi").unwrap().needed);
-        // nothing on the system: no administrator, no agreement for system tools, everything in the folder
-        assert!(!p.needs_admin && !p.needs_prereqs && p.tools.is_empty() && p.toolchain == Toolchain::Portable);
-        assert_eq!(p.download_bytes, portable::bytes(&portable::all_pins()));
         // 10 GB of RomFS and the rest, nowhere near the 65 GB asked before
         assert!((12 * space::GB..18 * space::GB).contains(&p.disk_needed), "{}", p.disk_needed);
         assert!(!p.existing && !p.foreign);

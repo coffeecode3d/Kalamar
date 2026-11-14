@@ -345,7 +345,7 @@ export interface PrereqTool { id: string; winget: string; path: string | null }
 export interface Download { id: string; source: string; items: string[]; needed: boolean; bytes: number }
 export interface InstallPlan {
   install_dir: string; game_root: string; tools: PrereqTool[]; missing_packages: string[]; winget: string | null; needs_admin: boolean;
-  needs_prereqs: boolean; toolchain: "portable" | "msys2"; tools_dir: string; downloads: Download[]; download_bytes: number;
+  needs_prereqs: boolean; toolchain: "portable" | "msys2" | "system"; tools_dir: string; downloads: Download[]; download_bytes: number;
   steps: { id: StepId; done: boolean; reference: number }[]; disk_free: number | null; disk_needed: number; disk_peak_step: StepId | null; footprint: number; ram: number | null; cpus: number; jobs: number; source_commit: string | null;
   eta: number; eta_max: number; existing: boolean; existing_finished: boolean; foreign: boolean; needs_files: boolean; incremental: boolean;
   adopted_from_kit: boolean; build_files: number; update: UpdatePreview | null; installed_source: string | null;

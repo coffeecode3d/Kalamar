@@ -404,6 +404,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn host_environment_is_exactly_the_documented_one() {
         let env = build_match_env(&MatchVars::default(), Role::Host, &spec(), &paths(), "Kay").unwrap();
         let names: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();

@@ -12,12 +12,12 @@ use crate::util;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-pub const EXE_REL: [&str; 2] = ["build", "splat3.exe"];
+pub const EXE_REL: [&str; 2] = ["build", "splat3"];
 pub const ROMFS_BIN_REL: [&str; 2] = ["romfs", "romfs.bin"];
 pub const ROMFS_INDEX_REL: [&str; 2] = ["romfs", "index.json"];
 
 pub fn exe_path(root: &Path) -> PathBuf {
-    root.join(EXE_REL[0]).join(EXE_REL[1])
+    root.join(EXE_REL[0]).join(crate::installer::exe_name(EXE_REL[1]))
 }
 /// The runtime's settings file, in the game's build folder. The runtime reads `kalamar.ini` first, falls back to
 /// `totk.ini` when only the old one exists, and writes back to whichever it read (it never deletes the old file); the
@@ -40,7 +40,7 @@ pub fn save_dir(root: &Path) -> PathBuf {
 pub fn translator_path(root: &Path, override_path: Option<&Path>) -> PathBuf {
     match override_path {
         Some(p) => p.to_path_buf(),
-        None => root.parent().unwrap_or(root).join("xlate").join("totk_xlate.exe"),
+        None => root.parent().unwrap_or(root).join("xlate").join(crate::installer::exe_name(crate::installer::XLATE_STEM)),
     }
 }
 
@@ -261,7 +261,7 @@ mod tests {
         touch(&exe_path(&root));
         touch(&root.join("romfs").join("romfs.bin"));
         touch(&root.join("romfs").join("index.json"));
-        touch(&base.join("xlate").join("totk_xlate.exe"));
+        touch(&base.join("xlate").join(crate::installer::exe_name(crate::installer::XLATE_STEM)));
         let s = detect(Some(&root), None);
         assert!(s.ready, "{:?}", s.missing);
         assert!(s.build_date.is_some());
@@ -281,7 +281,7 @@ mod tests {
         touch(&exe_path(&root));
         touch(&root.join("romfs").join("romfs.bin"));
         touch(&root.join("romfs").join("index.json"));
-        touch(&base.join("xlate").join("totk_xlate.exe"));
+        touch(&base.join("xlate").join(crate::installer::exe_name(crate::installer::XLATE_STEM)));
         touch(&logs_dir(&root).join("run-20260101-000000.log"));
         let (full, light) = (detect(Some(&root), None), detect_light(Some(&root), None));
         assert!(full.last_log.is_some() && light.last_log.is_none());
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn translator_override_wins() {
         let r = Path::new("C:/w/root");
-        assert_eq!(translator_path(r, None), Path::new("C:/w").join("xlate").join("totk_xlate.exe"));
+        assert_eq!(translator_path(r, None), Path::new("C:/w").join("xlate").join(crate::installer::exe_name(crate::installer::XLATE_STEM)));
         assert_eq!(translator_path(r, Some(Path::new("D:/t.exe"))), Path::new("D:/t.exe"));
     }
 

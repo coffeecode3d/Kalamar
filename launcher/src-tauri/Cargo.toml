@@ -48,6 +48,10 @@ minisign-verify = "=0.3.0"
 # (password-protected secret keys) and signatures, compatible with the minisign command-line tool.
 minisign = "=0.10.0"
 
+[target.'cfg(unix)'.dependencies]
+# Free space (statvfs), process groups and signals: the Linux counterpart of the Win32 calls in installer/sys.rs.
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 # Job objects (cancel kills the build's process tree), free space, memory, running processes, opening a verified
 # release installer (ShellExecute: it may ask for elevation itself), the notification-area icon and its notifications

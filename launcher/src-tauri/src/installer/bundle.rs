@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 pub const ARCHIVE_NAME: &str = "runtime-src.tar.gz";
 pub const MANIFEST_NAME: &str = "runtime-src.json";
@@ -129,15 +129,24 @@ pub fn scan_entry(path: &str, data: &[u8]) -> Vec<String> {
     found
 }
 
-/// Whether an archive entry path is a safe relative path (no `..`, no root, no drive).
+/// Whether an archive entry path is a safe relative path (no `..`, no root, no drive). Both separators are read as
+/// separators whatever the host: an archive is data, not this machine's path syntax.
 pub fn safe_relative(path: &str) -> Option<PathBuf> {
-    let p = Path::new(path);
+    if path.contains('\0') {
+        return None;
+    }
+    let normalized = path.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    let drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    if drive || normalized.starts_with('/') || normalized.starts_with("//") {
+        return None;
+    }
     let mut out = PathBuf::new();
-    for c in p.components() {
-        match c {
-            Component::Normal(s) => out.push(s),
-            Component::CurDir => {}
-            _ => return None,
+    for part in normalized.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => return None,
+            s => out.push(s),
         }
     }
     if out.as_os_str().is_empty() { None } else { Some(out) }

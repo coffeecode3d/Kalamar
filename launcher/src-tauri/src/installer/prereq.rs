@@ -68,6 +68,7 @@ fn env_dir(var: &str) -> Option<PathBuf> {
     std::env::var_os(var).map(PathBuf::from)
 }
 
+#[cfg(windows)]
 pub fn find_git() -> Option<PathBuf> {
     let mut c = on_path("git.exe");
     c.push(PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"));
@@ -77,12 +78,25 @@ pub fn find_git() -> Option<PathBuf> {
     c.into_iter().find(|p| p.is_file())
 }
 
+#[cfg(windows)]
 pub fn find_dotnet() -> Option<PathBuf> {
     let mut c = on_path("dotnet.exe");
     c.push(PathBuf::from(r"C:\Program Files\dotnet\dotnet.exe"));
     c.into_iter()
         .filter(|p| p.is_file())
         .find(|d| run_capture(d, &["--list-sdks"], T).is_some_and(|(_, out)| out.lines().any(|l| l.trim_start().starts_with("10."))))
+}
+
+#[cfg(not(windows))]
+pub fn find_git() -> Option<PathBuf> {
+    on_path("git").into_iter().next()
+}
+
+/// `dotnet` with an SDK 10 (`dotnet --list-sdks`), which the shader translator's NativeAOT publish needs.
+#[cfg(not(windows))]
+pub fn find_dotnet() -> Option<PathBuf> {
+    let d = on_path("dotnet").into_iter().next()?;
+    dotnet_sdk_10().then_some(d)
 }
 
 fn is_py313(p: &Path) -> bool {
@@ -198,6 +212,7 @@ impl Detection {
     }
 }
 
+#[cfg(windows)]
 pub fn detect() -> Detection {
     let s = |p: Option<PathBuf>| p.map(|p| p.display().to_string());
     let bash = msys_bash();
@@ -245,6 +260,124 @@ pub fn winget_outcome(code: i32) -> WingetOutcome {
     }
 }
 
+// ---- Linux: the system's tools ---------------------------------------------------------------------------------
+
+/// A tool the Linux build takes from the system (`engine/docs/building.md`, "Linux"), and the package most
+/// distributions put it in.
+#[cfg(not(windows))]
+#[derive(Debug, Clone, Copy)]
+pub struct SystemTool {
+    /// Stable id the interface translates: `clang`, `lld`, `ninja`, `python`, ...
+    pub id: &'static str,
+    /// A package name that provides it (a hint, per distribution wording in the interface).
+    pub package: &'static str,
+    /// File names looked for on `PATH`, in order.
+    pub names: &'static [&'static str],
+}
+
+#[cfg(not(windows))]
+pub const SYSTEM_TOOLS: [SystemTool; 8] = [
+    SystemTool { id: "clang", package: "clang", names: &["clang"] },
+    SystemTool { id: "lld", package: "lld", names: &["ld.lld", "lld"] },
+    SystemTool { id: "llvm_ar", package: "llvm", names: &["llvm-ar"] },
+    SystemTool { id: "ninja", package: "ninja", names: &["ninja"] },
+    SystemTool { id: "make", package: "make", names: &["make", "gmake"] },
+    SystemTool { id: "python", package: "python3", names: &["python3"] },
+    SystemTool { id: "git", package: "git", names: &["git"] },
+    SystemTool { id: "dotnet", package: "dotnet-sdk", names: &["dotnet"] },
+];
+
+/// The development libraries the game links against, by `pkg-config` name and package.
+#[cfg(not(windows))]
+pub const SYSTEM_LIBS: [(&str, &str, &str); 5] = [
+    ("sdl3", "sdl3", "SDL3"),
+    ("opus", "opus", "Opus"),
+    ("vpx", "vpx", "libvpx"),
+    ("zstd", "libzstd", "Zstandard"),
+    ("vulkan", "vulkan", "Vulkan headers and loader"),
+];
+
+#[cfg(not(windows))]
+pub fn find_system_tool(tool: &SystemTool) -> Option<PathBuf> {
+    tool.names.iter().find_map(|n| on_path(n).into_iter().next())
+}
+
+/// `pkg-config --exists <name>` and `--modversion`: a development library with its headers.
+#[cfg(not(windows))]
+fn pkg_ready(name: &str) -> bool {
+    let Some(pkg) = on_path("pkg-config").into_iter().next() else { return false };
+    run_capture(&pkg, &["--exists", name], T).is_some_and(|(c, _)| c == 0)
+}
+
+/// The system tools and libraries the build needs that are not there (`engine/docs/building.md`, "Linux").
+#[cfg(not(windows))]
+pub fn system_missing() -> Vec<&'static str> {
+    let mut missing: Vec<&'static str> = SYSTEM_TOOLS.iter().filter(|t| find_system_tool(t).is_none()).map(|t| t.id).collect();
+    if !missing.contains(&"dotnet") && !dotnet_sdk_10() {
+        missing.push("dotnet");
+    }
+    if !missing.contains(&"python") && !python_usable() {
+        missing.push("python");
+    }
+    missing.extend(SYSTEM_LIBS.iter().filter(|(_, pkg, _)| !pkg_ready(pkg)).map(|(id, _, _)| *id));
+    missing
+}
+
+#[cfg(not(windows))]
+pub fn system_ready() -> bool {
+    system_missing().is_empty()
+}
+
+/// The packages that provide what [`system_missing`] reports (`clang`, `lld`, `sdl3`, ...), for the plan and the error
+/// screen.
+#[cfg(not(windows))]
+pub fn missing_packages() -> Vec<String> {
+    system_missing()
+        .iter()
+        .map(|id| {
+            SYSTEM_TOOLS
+                .iter()
+                .find(|t| t.id == *id)
+                .map(|t| t.package.to_string())
+                .or_else(|| SYSTEM_LIBS.iter().find(|(i, _, _)| i == id).map(|(_, p, _)| p.to_string()))
+                .unwrap_or_else(|| id.to_string())
+        })
+        .collect()
+}
+
+/// .NET SDK 10 (`dotnet --list-sdks`), which the shader translator's NativeAOT publish needs.
+#[cfg(not(windows))]
+fn dotnet_sdk_10() -> bool {
+    on_path("dotnet")
+        .into_iter()
+        .next()
+        .is_some_and(|d| run_capture(&d, &["--list-sdks"], T).is_some_and(|(_, out)| out.lines().any(|l| l.trim_start().starts_with("10."))))
+}
+
+/// A `python3` recent enough for the build tools (3.12+) whose `venv` module works (Debian keeps it in `python3-venv`).
+#[cfg(not(windows))]
+pub fn python_usable() -> bool {
+    on_path("python3").into_iter().next().is_some_and(|p| {
+        run_capture(&p, &["-c", "import sys, venv, ensurepip; print(sys.version_info >= (3, 12))"], T)
+            .is_some_and(|(c, out)| c == 0 && out.trim() == "True")
+    })
+}
+
+#[cfg(not(windows))]
+pub fn find_python_system() -> Option<PathBuf> {
+    let p = on_path("python3").into_iter().next()?;
+    python_usable().then_some(p)
+}
+
+#[cfg(not(windows))]
+pub fn detect() -> Detection {
+    let tools: Vec<Tool> = SYSTEM_TOOLS
+        .iter()
+        .map(|t| Tool { id: t.id, winget: t.package, path: find_system_tool(t).map(|p| p.display().to_string()) })
+        .collect();
+    Detection { tools, missing_packages: missing_packages(), winget: None }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +405,7 @@ mod tests {
         assert_eq!(winget_outcome(1), WingetOutcome::Failed);
     }
 
+    #[cfg(windows)]
     #[test]
     fn capture_times_out_and_reads_output() {
         let sys = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
@@ -281,5 +415,23 @@ mod tests {
         assert_eq!(out.trim(), "hi");
         assert!(run_capture(&cmd, &["/C", "ping -n 5 127.0.0.1 >NUL"], Duration::from_millis(200)).is_none());
         assert!(run_capture(Path::new(r"Z:\none.exe"), &[], T).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_system_tools_are_detected() {
+        assert!(system_ready(), "missing: {:?}", system_missing());
+        assert!(find_python_system().is_some());
+        assert!(find_git().is_some());
+        assert!(find_dotnet().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_times_out_and_reads_output() {        let (code, out) = run_capture(Path::new("sh"), &["-c", "echo hi"], T).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(out.trim(), "hi");
+        assert!(run_capture(Path::new("sh"), &["-c", "sleep 5"], Duration::from_millis(200)).is_none());
+        assert!(run_capture(Path::new("/nonexistent/kalamar-no-such-tool"), &[], T).is_none());
     }
 }

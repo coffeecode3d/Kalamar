@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 /// A program of Windows by its full path in System32 (`GetSystemDirectoryW`), never a bare name: Windows looks for a
 /// bare name in the launcher's own folder first, so a file dropped next to a portable launcher would run instead.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn system_exe(name: &str) -> PathBuf {
     #[cfg(windows)]
     {
@@ -24,6 +25,7 @@ pub fn system_exe(name: &str) -> PathBuf {
 }
 
 /// A program of the Windows folder itself (`explorer.exe`), by its full path: the parent of System32.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn windows_exe(name: &str) -> PathBuf {
     let sys = system_exe("x");
     sys.parent().and_then(|s| s.parent()).map(|w| w.join(name)).unwrap_or_else(|| PathBuf::from(r"C:\Windows").join(name))
@@ -44,6 +46,7 @@ pub fn harden() {
 /// Chooses the window to focus among `(window id, owner pid, title)`: one owned by `pid` first, else one owned by
 /// another process of the game (the game restarts itself once on a first launch, and the new process is not our
 /// child), never the second local player's window (its title starts with `Kalamar`).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn pick_window(windows: &[(isize, u32, String)], pid: Option<u32>, game_pids: &[u32]) -> Option<isize> {
     let ours = |w: &&(isize, u32, String)| !w.2.starts_with("Kalamar");
     pid.and_then(|p| windows.iter().find(|w| w.1 == p).map(|w| w.0))

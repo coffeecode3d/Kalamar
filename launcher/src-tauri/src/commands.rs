@@ -202,7 +202,7 @@ pub fn boot(state: St) -> Boot {
 /// "Back to the game": brings the running game's window to the front. `false` when it has none (yet).
 #[tauri::command(async)]
 pub fn game_focus(state: St) -> bool {
-    crate::winutil::focus_game(state.game.status().pid, "splat3.exe")
+    crate::winutil::focus_game(state.game.status().pid, &installer::exe_name(installer::GAME_STEM))
 }
 
 fn existing_dir(p: &str, what: &str) -> AppResult<PathBuf> {
@@ -733,7 +733,8 @@ pub fn open_logs_folder(state: St) -> AppResult<String> {
     }
     #[cfg(not(windows))]
     {
-        Err(AppError::NotAvailable(format!("opening {} is only implemented on Windows", dir.display())))
+        std::process::Command::new("xdg-open").arg(&dir).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map_err(|e| AppError::io(&dir, &e))?;
+        Ok(dir.display().to_string())
     }
 }
 
@@ -1787,7 +1788,7 @@ pub struct FreshEstimate {
 }
 
 fn default_install_dir() -> String {
-    let home = std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let home = crate::config::user_profile().unwrap_or_else(std::env::temp_dir);
     home.join("Kalamar").display().to_string()
 }
 
@@ -2137,6 +2138,10 @@ pub fn installer_open_logs(dir: String) -> AppResult<String> {
     {
         std::process::Command::new(crate::winutil::windows_exe("explorer.exe")).arg(&logs).spawn().map_err(|e| AppError::io(&logs, &e))?;
     }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("xdg-open").arg(&logs).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map_err(|e| AppError::io(&logs, &e))?;
+    }
     Ok(logs.display().to_string())
 }
 
@@ -2339,6 +2344,7 @@ mod tests {
         }
     }
     #[test]
+    #[cfg(windows)]
     fn the_second_players_folder_can_never_be_the_first_ones() {
         assert!(valid_second_dir("userdata-p2").is_ok());
         for bad in ["", "userdata", "UserData", ".hidden", "a/b", r"a\b", "..", "x y", &"a".repeat(41)] {
