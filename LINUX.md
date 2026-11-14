@@ -120,10 +120,14 @@ Linux build. Verified in this fork:
 
 Not verified here, and worth reporting:
 
-- A full install from real game files on Linux, and playing the built game. (An 11.2.0 update was extracted and its
-  code verified on Linux, the Python environment and hactool were built; the machine's base dump was incomplete, so the
-  RomFS merge stopped there. A base NSP is complete when it is about 4.7 GB: `merge_failed` with
-  `NCA section out of bounds` in `logs/romfs-merge.log` means the base file is truncated.)
+- A full install from real game files on Linux (Arch, 16 cores, 31 GB): an XCI base and the 11.2.0 update NSP, in
+  about 7 minutes, ending with the wizard's self-checks (`--selftest`, `--probe-profile`) passing and `build/splat3`
+  linked.
+- Playing the built game: started offline with `KLM_XLATE` and the profile, 1043 frames in 21.7 s (mean 48 fps on the
+  first run, while shaders are translated; the frame times settle as the cache fills). No missing shared libraries.
+- A base NSP is complete when it is about 4.7 GB: `merge_failed` with `NCA section out of bounds` in
+  `logs/romfs-merge.log` means the base file is truncated. An XCI of the cartridge works (the secure partition); the
+  update is an NSP.
 - The Steam Deck (SteamOS) and distributions other than the one used for the build.
 - Distributions whose `python3` is older than 3.14 or without `venv`.
 
