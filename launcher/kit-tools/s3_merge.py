@@ -5,6 +5,9 @@ HACTOOL_BASENCA_RANGE, the engine's tools/hactool/range.patch) instead of copies
 merge needs the free space of the merged image only. Without it the NCAs are copied out, as before."""
 import sys, os, re, json, hashlib, shutil, tempfile, subprocess
 from pathlib import Path
+# The wizard runs this script with -I, which ignores PYTHONUTF8: the log it is redirected to would otherwise take the
+# system code page and fail on an NSP whose name has characters outside it.
+sys.stdout.reconfigure(encoding='utf-8', errors='replace'); sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 base, update, keyp, hactool, output, vendor = map(Path, sys.argv[1:7])
 in_place = '--in-place' in sys.argv[7:]
 sys.path.insert(0, str(vendor))

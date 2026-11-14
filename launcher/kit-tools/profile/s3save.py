@@ -528,10 +528,21 @@ def byml_parse(b):
 
 
 def zstd_decompress(b):
+    # The Python the install wizard sets up is 3.14, whose standard library decompresses zstd. A zstd program is
+    # only the fallback of an older interpreter: a player's machine has none on PATH.
+    try:
+        from compression import zstd
+    except ImportError:
+        zstd = None
+    if zstd is not None:
+        try:
+            return zstd.decompress(b)
+        except zstd.ZstdError as e:
+            raise SaveError('zstd: %s' % e)
     import subprocess
     exe = shutil.which('zstd') or r'C:\msys64\ucrt64\bin\zstd.exe'
     if not os.path.exists(exe):
-        raise SaveError('zstd.exe is needed to read the RomFS tables (put it on PATH)')
+        raise SaveError('zstd is needed to read the RomFS tables: use Python 3.14 or later, or put zstd.exe on PATH')
     r = subprocess.run([exe, '-d', '-c', '-q'], input=b, capture_output=True)
     if r.returncode:
         raise SaveError('zstd: %s' % r.stderr.decode(errors='replace'))

@@ -50,6 +50,11 @@ if (-not (Test-Path $exe)) { throw "release-build: $exe not found" }
 # The search: bytes read as Latin-1 (one char per byte), UTF-16LE strings as their bytes interleaved with NULs.
 $text = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($exe))
 function Wide([string]$s) { ($s.ToCharArray() | ForEach-Object { [regex]::Escape([string]$_) + '\x00' }) -join '' }
+# The update repository is compiled in on purpose (KALAMAR_UPDATE_REPO, owner/name). Its owner may be named like the
+# Windows user: those occurrences are the public repository's address, not a trace of this machine.
+if ($env:KALAMAR_UPDATE_REPO -match '^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$') {
+    $text = $text.Replace($env:KALAMAR_UPDATE_REPO, '<update repository>')
+}
 $patterns = @()
 if ($env:USERNAME -and $env:USERNAME.Length -ge 3) { $patterns += [regex]::Escape($env:USERNAME); $patterns += (Wide $env:USERNAME) }
 $patterns += '(?i)users[\\/][a-z0-9]'

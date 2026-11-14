@@ -580,7 +580,14 @@ mod tests {
     fn build_commands_run_at_normal_priority_unless_asked() {
         use std::os::windows::io::AsRawHandle;
         let sys = std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into());
-        for (low, want) in [(false, 0x20u32), (true, BELOW_NORMAL_PRIORITY_CLASS)] {
+        // Without a priority flag a child gets the normal class, except that Windows hands down the parent's class
+        // when that is idle (0x40) or below normal (0x4000): hosted CI runners run their jobs below normal.
+        // SAFETY: the pseudo-handle of the current process is always valid.
+        let own = unsafe {
+            windows_sys::Win32::System::Threading::GetPriorityClass(windows_sys::Win32::System::Threading::GetCurrentProcess())
+        };
+        let inherited = if own == 0x40 || own == BELOW_NORMAL_PRIORITY_CLASS { own } else { 0x20u32 };
+        for (low, want) in [(false, inherited), (true, BELOW_NORMAL_PRIORITY_CLASS)] {
             let job = Job::new(low).unwrap();
             let mut cmd = Command::new(sys.join("System32").join("ping.exe"));
             cmd.args(["-n", "3", "127.0.0.1"]).stdout(std::process::Stdio::null());

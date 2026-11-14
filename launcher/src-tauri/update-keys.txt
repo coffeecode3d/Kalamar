@@ -3,3 +3,5 @@
 # First the maintainers' current key, then the backup key kept offline (used to rotate keys if the first is lost or leaked).
 # Only read when the build sets KALAMAR_UPDATE_REPO; with no repository the launcher has no update feature.
 # PUBLIC keys only. A secret key never goes in this repository.
+RWSz6XPKWGya8CvdisJMYU3bnbP7cXRYBTTCBH9ogWaiQpZcJ0sPvCDv
+RWR5qcFl8HS9kd9Akn+JSBy+Mh3hUoOuMdCYSXFOzEsvgpWV2INn3Nfz

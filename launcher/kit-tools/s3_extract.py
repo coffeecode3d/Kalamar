@@ -1,6 +1,8 @@
 """Extract ExeFS of an update NSP (no TotK identity checks). Usage: s3_extract.py NSP KEYS_PATH OUTDIR VENDOR_DIR"""
 import sys, struct, hashlib, json, io
 from pathlib import Path
+# Run with -I, which ignores PYTHONUTF8: keep the redirected log in UTF-8 whatever the system code page is.
+sys.stdout.reconfigure(encoding='utf-8', errors='replace'); sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 nsp, keyp, out, vendor = map(Path, sys.argv[1:5])
 sys.path.insert(0, str(vendor))
 from extract_exefs import (container_entries, common_tickets, nca_inventory, nca_ctr_key, record_offset,

@@ -70,7 +70,29 @@ jobs:
           npm run build
       - name: Tests
         working-directory: launcher/src-tauri
-        run: cargo test --locked
+        shell: pwsh
+        # A failure also shows each failing test and its panic message as an annotation of the run, so that the cause
+        # is readable without opening the log.
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'cargo-test.log'
+          cargo test --locked 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $lines = @(Get-Content $log | ForEach-Object { $_ -replace "`e\[[0-9;]*m", '' })
+            $shown = 0
+            for ($i = 0; $i -lt $lines.Count -and $shown -lt 9; $i++) {
+              if ($lines[$i] -match '^---- (.+) stdout ----$' -or $lines[$i] -match '^error(\[|:)') {
+                $isTest = $lines[$i].StartsWith('----')
+                $title = if ($isTest) { $Matches[1] } else { 'cargo' }
+                $first = if ($isTest) { $i + 1 } else { $i }
+                $last = [Math]::Min($i + 12, $lines.Count - 1)
+                $text = ($lines[$first..$last] | Where-Object { $_.Trim() }) -join '%0A'
+                Write-Output "::error title=$title::$text"
+                $shown++
+              }
+            }
+          }
+          exit $code
       - name: Clippy
         working-directory: launcher/src-tauri
         run: cargo clippy --locked --all-targets -- -D warnings

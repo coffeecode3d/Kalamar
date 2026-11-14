@@ -217,7 +217,7 @@ impl Run {
     /// Python 3.14.9 (python.org's embeddable build) with the five packages the steps import, in `<I>\tools\python`;
     /// nothing is installed on the system. An older install's virtual environment (`work\venv`) is kept while it works.
     pub(super) fn step_python(&mut self) -> StepResult {
-        let ready = |p: &Path| p.is_file() && prereq::run_capture(p, &["-I", "-c", "import cryptography, numpy, lz4.block"], Duration::from_secs(60)).is_some_and(|(c, _)| c == 0);
+        let ready = |p: &Path| p.is_file() && prereq::run_capture(p, &["-I", "-c", "import cryptography, numpy, lz4.block; from compression import zstd"], Duration::from_secs(60)).is_some_and(|(c, _)| c == 0);
         let root = self.lay.root.clone();
         #[cfg(not(windows))]
         {
