@@ -54,6 +54,8 @@ The launcher keeps its data in `$XDG_DATA_HOME/dev.kalamar.launcher` (`~/.local/
   `build_xlate.py`), since the prebuilt pair the Windows launcher carries is a Windows binary. This is why Git and the
   .NET 10 SDK are required. The release workflow can bundle Linux prebuilts later without changing the wizard.
 - **Paths and names**: `build/splat3` and `xlate/totk_xlate` (no `.exe`), POSIX steps, data under XDG directories.
+- **Base game files**: the wizard accepts an NSP or an XCI cartridge image for the base game (the secure partition's
+  NCAs); the 11.2.0 update is an NSP.
 - **System integration**: process groups (cancelling the wizard kills the whole build tree), `/proc` scans for "is the
   game running" and "another launcher instance", `xdg-open` for folders, `nice` for low-priority builds.
 - **Self-update** stays off in this build (no update repository is named): update by downloading the new AppImage.
