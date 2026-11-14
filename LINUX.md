@@ -102,7 +102,8 @@ Linux build. Verified in this fork:
 
 - `cargo test --lib` on Linux: all tests pass (the Windows-path tests are gated on `cfg(windows)`).
 - `tsc`, the interface build and the interface tests.
-- The AppImage build (`tauri build --bundles appimage`).
+- The AppImage build (`tauri build --bundles appimage`, 119 MB), its structure, and a launch with a throwaway profile:
+  the window opens and the data folders are created under `KALAMAR_APPDATA`.
 
 Not verified here, and worth reporting:
 
