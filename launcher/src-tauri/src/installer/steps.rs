@@ -1959,6 +1959,12 @@ mod tests {
 
     #[test]
     fn the_update_check_of_the_play_page() {
+        #[cfg(not(windows))]
+        if !prereq::system_ready() {
+            // This machine lacks the Linux build tools, so the wizard would also list Prereqs: not what this tests.
+            eprintln!("skipping: the Linux build tools are not installed here");
+            return;
+        }
         let (root, lay, _) = built_install("check");
         let same = make_bundle(&root.join("same"), &BASE, "c0");
         let c = update_check(&root, &same).unwrap();

@@ -417,13 +417,21 @@ mod tests {
         assert!(run_capture(Path::new(r"Z:\none.exe"), &[], T).is_none());
     }
 
+    /// The detection reports only known ids, and a tool it finds is a file that exists. (The CI runner has no game
+    /// build tools, so this does not require them: whether a machine is ready is what the plan screen shows.)
     #[cfg(unix)]
     #[test]
-    fn linux_system_tools_are_detected() {
-        assert!(system_ready(), "missing: {:?}", system_missing());
-        assert!(find_python_system().is_some());
-        assert!(find_git().is_some());
-        assert!(find_dotnet().is_some());
+    fn linux_system_tool_detection_is_consistent() {
+        let known: Vec<&str> = SYSTEM_TOOLS.iter().map(|t| t.id).chain(SYSTEM_LIBS.iter().map(|(id, _, _)| *id)).collect();
+        for id in system_missing() {
+            assert!(known.contains(&id), "unknown id {id}");
+        }
+        for tool in &SYSTEM_TOOLS {
+            if let Some(p) = find_system_tool(tool) {
+                assert!(p.is_file(), "{}: {}", tool.id, p.display());
+            }
+        }
+        assert_eq!(system_ready(), system_missing().is_empty());
     }
 
     #[cfg(unix)]
