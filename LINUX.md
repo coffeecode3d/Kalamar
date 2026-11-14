@@ -86,6 +86,17 @@ npx tauri build --bundles appimage
 # the file is in src-tauri/target/release/bundle/appimage/
 ```
 
+To run the wizard without its window (useful on a headless machine, or to keep the full log):
+
+```sh
+cd launcher/src-tauri
+cargo run --example install_headless -- --plan \
+  --dir "$HOME/Kalamar" --base <base.nsp> --update <11.2.0 update.nsp> --keys <prod.keys>
+# then without --plan to install, adding --jobs N or --stop-before compile if wanted
+```
+
+The keys file is only passed to the tools by path; the example never opens it.
+
 For development:
 
 ```sh
@@ -107,7 +118,10 @@ Linux build. Verified in this fork:
 
 Not verified here, and worth reporting:
 
-- A full install from real game files on Linux, and playing the built game.
+- A full install from real game files on Linux, and playing the built game. (An 11.2.0 update was extracted and its
+  code verified on Linux, the Python environment and hactool were built; the machine's base dump was incomplete, so the
+  RomFS merge stopped there. A base NSP is complete when it is about 4.7 GB: `merge_failed` with
+  `NCA section out of bounds` in `logs/romfs-merge.log` means the base file is truncated.)
 - The Steam Deck (SteamOS) and distributions other than the one used for the build.
 - Distributions whose `python3` is older than 3.14 or without `venv`.
 
