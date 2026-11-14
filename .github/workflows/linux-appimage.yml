@@ -1,0 +1,93 @@
+# The Linux launcher: a release build of the Tauri app as an AppImage, on every push to `linux` (artifact) and on
+# tags (a GitHub release with the AppImage and its SHA-256). The Linux port only; the upstream workflows still cover
+# Windows and the engine.
+name: Linux AppImage
+
+on:
+  push:
+    branches: [linux]
+    tags: ["v*"]
+  pull_request:
+    branches: [linux]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.97.1"
+  APPIMAGE_EXTRACT_AND_RUN: "1"
+
+jobs:
+  appimage:
+    name: Build AppImage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: launcher/package-lock.json
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install $RUST_TOOLCHAIN --profile minimal
+          rustup default $RUST_TOOLCHAIN
+      - name: Linux libraries Tauri needs (WebKitGTK, AppIndicator, patchelf, appimagetool's needs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential file pkg-config patchelf desktop-file-utils \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: launcher/src-tauri -> target
+      - name: Interface dependencies
+        working-directory: launcher
+        run: npm ci --no-audit --no-fund
+      - name: Tests of the back end (Linux)
+        working-directory: launcher/src-tauri
+        run: cargo test --locked --lib
+      - name: AppImage
+        working-directory: launcher
+        run: npx tauri build --bundles appimage
+      - name: Checksums and a readable name
+        working-directory: launcher
+        run: |
+          set -euo pipefail
+          app=$(ls src-tauri/target/release/bundle/appimage/*.AppImage | head -1)
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          out="Kalamar-${version}-x86_64.AppImage"
+          cp "$app" "../$out"
+          (cd .. && sha256sum "$out" > "$out.sha256")
+          echo "APPIMAGE=$out" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Kalamar-linux-appimage
+          path: |
+            ${{ env.APPIMAGE }}
+            ${{ env.APPIMAGE }}.sha256
+          if-no-files-found: error
+      - name: Release on a tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes="Kalamar launcher for Linux x86-64, built from the \`linux\` branch at ${GITHUB_SHA:0:12}.
+          This AppImage is the launcher only: it builds the game from your own game files on first install."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$APPIMAGE" "$APPIMAGE.sha256" --clobber
+          else
+            gh release create "$tag" "$APPIMAGE" "$APPIMAGE.sha256" --title "Kalamar $tag (Linux)" --notes "$notes"
+          fi

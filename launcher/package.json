@@ -12,7 +12,7 @@
     "test:ui": "node --test src/community/waiting.test.mjs src/community/queueHint.test.mjs src/community/draftState.test.mjs src/community/cleanText.test.mjs src/redact.test.mjs src/locales/locales.test.mjs src/gameLang.test.mjs src/sound/sounds.test.mjs src/install/wait.test.mjs src/discord/presence.test.mjs",
     "tauri": "tauri",
     "tauri:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-build.ps1",
-    "bundle:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bundle-runtime.ps1"
+    "bundle:runtime": "node scripts/bundle-runtime.mjs"
   },
   "dependencies": {
     "@fontsource-variable/archivo": "5.2.8",
