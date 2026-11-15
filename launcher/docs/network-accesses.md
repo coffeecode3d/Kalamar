@@ -6,8 +6,9 @@ What the launcher protects players from, and the risks that remain online, are i
 The launcher sends no telemetry. Its network accesses, all of them:
 
 0. The launcher's own update check, only in a build that names an update repository (`KALAMAR_UPDATE_REPO`, set by
-   `scripts/make-release.ps1`; a build without it has no update feature at all): 20 s after start at most once per
-   24 h if "Check automatically" is on (Settings › About, on by default), and on "Check for updates": GitHub's public
+   `scripts/make-release.ps1`; a build without it has no update feature at all): 20 s after every
+   start and then every 6 hours while the launcher stays open, if "Check automatically" is on (Settings › About, on by
+   default), and on "Check for updates": GitHub's public
    release API (`api.github.com`, no token or identifier, an ETag), then, for a newer release only, its signed manifest
    and signature from `github.com` (redirected only to GitHub's release-asset hosts). The program itself is downloaded
    only when the player clicks "Update". GitHub sees the IP address. See [releasing.md](releasing.md).

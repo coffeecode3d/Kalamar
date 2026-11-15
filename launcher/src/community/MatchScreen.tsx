@@ -20,7 +20,7 @@ import { CopyButton } from "../ui";
 import { SpectatorControls, isSpectator } from "./Stands";
 
 /** Runner phases in which the game is up or being brought up (the screen is shown). */
-const ACTIVE = ["launching", "continuing", "running", "uploading"];
+const ACTIVE = ["closing", "launching", "continuing", "running", "uploading"];
 /** Runner phases that stopped the match: the screen shows the reason (1.1.7: `late`, a spectator whose match had
  *  started). */
 export const RUNNER_STOPPED = ["refused", "failed", "closed", "late"];

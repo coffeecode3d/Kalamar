@@ -9,7 +9,7 @@ Install the launcher, let it build the game from your own files, play offline. N
   not verified** with this game (a crash at load and graphical defects were reported on one).
 - About 15 GB free on the install drive for a first install, about 13 GB used afterwards (the wizard checks the
   space before every step).
-- Your own files, dumped from your own console: the game, its **11.2.0** update, and your console's keys file. They are
+- Your own files, dumped from your own console: the game, its **11.3.0** update, and your console's keys file. They are
   only read; the wizard never copies, uploads or modifies them.
 
 ## 1. Install and build
@@ -50,6 +50,13 @@ weapon and name card; they are applied to your save when the game starts (a back
 [engine/docs/save-profile.md](../engine/docs/save-profile.md)). Names and icons in the Locker are read from your own
 game files at run time; none are shipped.
 
+In the Gear tab, under the piece you chose, three slots hold its **sub-abilities**: pick a slot, then an ability (or
+*Empty*; tick *Fill all three with this ability* to use it in every slot); *Clear* empties the three. The main ability
+cannot be changed, only some of the game's abilities fit a sub slot, and a piece with sub-abilities shows with 2 stars in
+the game. A server room set to "main abilities only" ignores them. The option *Full stock of ability chunks* (off by
+default) gives you 999 chunks of each of those abilities. Both appear only when your game is recent enough; otherwise the
+Locker says a game update is needed.
+
 Offline means offline: the game opens no network socket. Manual LAN play on one network (or through a relay you name)
 is in the Play screen's *Advanced* drawer; see [engine/docs/lan-play.md](../engine/docs/lan-play.md).
 
@@ -68,7 +75,7 @@ is in the Play screen's *Advanced* drawer; see [engine/docs/lan-play.md](../engi
 
 | What | Where |
 |---|---|
-| The built game, your saves, logs, caches | `<install>\work\splatoon3-11.2.0\` (`userdata\` holds saves, logs and caches) |
+| The built game, your saves, logs, caches | `<install>\work\splatoon3-11.3.0\` (`userdata\` holds saves, logs and caches) |
 | The launcher's data (profile, servers, settings of the launcher) | `%APPDATA%\dev.kalamar.launcher\` (a pre-release launcher's `dev.splat3recomp.launcher` folder is moved there at the first start) |
 | The engine source the wizard compiled | `<install>\src\` |
 
@@ -80,7 +87,13 @@ Everything in the install folder except your saves and settings is derived from 
   resumes at that step, and closing the launcher in the middle is safe (the next start offers to resume). Each step's
   log is in `<install>\logs\`.
 - **"Wrong update" or a version error**: the wizard recognizes the update by the hash of its program; only the
-  **11.2.0** update is supported.
+  **11.3.0** update is supported. The 11.2.0 update, which earlier versions of Kalamar used, is named as such and
+  refused.
+- **"Game update needed" on the Play page**: your game was built for 11.2.0. It still starts for offline play; online
+  play needs 11.3.0. Click **Update the game**: the wizard asks for the 11.3.0 update file (the base game and the
+  keys file again only if it cannot find them), builds 11.3.0 next to your game, copies your saves and profile into
+  it, and deletes the 11.2.0 folder (about 14 GB) only after the new game has passed its checks. If the update
+  fails, nothing is deleted and your 11.2.0 game stays as it was.
 - **Not enough space**: the wizard checks before every step and says how much it needs; free space or choose another
   drive.
 - **The game does not start or crashes**: update your graphics driver first. The launcher's simple mode offers

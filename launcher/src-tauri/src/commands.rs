@@ -72,6 +72,14 @@ impl AppState {
         cfg.root.map(PathBuf::from).or_else(config::default_root).ok_or(AppError::NoRoot)
     }
 
+    /// The abilities a sub slot can hold, read from the install's keys file (`game::subs`). The install folder is the
+    /// wizard's choice, else two levels above the game folder (`<install>\work\<game>`), as `proto::glue` finds it.
+    pub(crate) fn sub_capable(&self) -> Option<Vec<String>> {
+        let configured = self.cfg().install.dir.map(PathBuf::from);
+        let from_root = self.root().ok().and_then(|r| r.parent().and_then(Path::parent).map(Path::to_path_buf));
+        configured.into_iter().chain(from_root).find_map(|d| crate::game::subs::read_sub_capable(&installer::Layout::new(d).keys_json()))
+    }
+
     fn translator(&self) -> Option<PathBuf> {
         self.cfg().translator.map(PathBuf::from)
     }
@@ -428,7 +436,7 @@ pub struct LaunchRecord {
 }
 
 fn profile_options(cfg: &LauncherConfig) -> profile::ApplyOptions {
-    profile::ApplyOptions { skip_first_launch: cfg.skip_first_launch, unlock_all: cfg.unlock_all }
+    profile::ApplyOptions { skip_first_launch: cfg.skip_first_launch, unlock_all: cfg.unlock_all, unlock_chunks: cfg.unlock_chunks }
 }
 
 /// The profile part of a launch.
@@ -923,6 +931,8 @@ pub struct LaunchOptions {
     pub apply_profile: bool,
     pub skip_first_launch: bool,
     pub unlock_all: bool,
+    #[serde(default)]
+    pub unlock_chunks: bool,
 }
 
 #[tauri::command]
@@ -931,6 +941,7 @@ pub fn set_launch_options(state: St, options: LaunchOptions) -> AppResult<Config
         c.apply_profile = options.apply_profile;
         c.skip_first_launch = options.skip_first_launch;
         c.unlock_all = options.unlock_all;
+        c.unlock_chunks = options.unlock_chunks;
     })?;
     Ok(config_view(&state))
 }
@@ -1166,7 +1177,45 @@ pub fn profile_load(state: St) -> Profile {
 
 fn validated(state: &AppState, p: &Profile) -> AppResult<Profile> {
     let view = catalogue_view(state, false);
-    profile::validate_profile(p, &view.catalogue)
+    let subs = state.sub_capable();
+    profile::validate_profile(p, &view.catalogue, subs.as_deref())
+}
+
+/// What the Locker's sub-ability editor needs to know (`gear_abilities_info`).
+#[derive(Serialize)]
+pub struct GearAbilitiesInfo {
+    /// The editor is shown: the installed engine declares `gear-abilities` and the ability list is known.
+    pub supported: bool,
+    /// The game is installed but its engine does not declare `gear-abilities` (or no ability list can be read): the
+    /// Locker asks for a game update.
+    pub update_needed: bool,
+    /// The abilities a sub slot can hold, in the game's enum order (from the install's keys file, `game::subs`).
+    pub abilities: Vec<String>,
+}
+
+/// Whether the installed game applies sub abilities, and which abilities a sub slot can hold. The engine's capability
+/// list is read from its cached listing (it runs once per executable, with no window).
+#[tauri::command(async)]
+pub fn gear_abilities_info(state: St) -> GearAbilitiesInfo {
+    let abilities = state.sub_capable().unwrap_or_default();
+    let engine_ok = match state.root() {
+        Ok(root) if install::exe_path(&root).is_file() => {
+            let cwd = install::userdata_dir(&root);
+            let _ = std::fs::create_dir_all(&cwd);
+            let lang = crate::proto::engine::list_lang(&state.cfg().language);
+            let info = crate::proto::engine::engine_info_in(&state.data_dir, &install::exe_path(&root), &cwd, Some(lang));
+            Some(crate::proto::engine::caps(Some(&info)).gear_abilities)
+        }
+        _ => None,
+    };
+    gear_abilities_status(engine_ok, abilities)
+}
+
+/// The decision of [`gear_abilities_info`]: `engine_ok` is `None` without an installed game, else whether its engine
+/// declares the capability.
+fn gear_abilities_status(engine_ok: Option<bool>, abilities: Vec<String>) -> GearAbilitiesInfo {
+    let supported = engine_ok == Some(true) && !abilities.is_empty();
+    GearAbilitiesInfo { supported, update_needed: engine_ok.is_some() && !supported, abilities: if supported { abilities } else { Vec::new() } }
 }
 
 /// Validates and saves `profile.json`. The profile is applied to the game's save at the next launch (the runtime does
@@ -1604,7 +1653,7 @@ pub fn match_start(app: AppHandle, state: St, request: MatchStart) -> AppResult<
     for f in [&paths.status, &paths.result] {
         let _ = std::fs::remove_file(f);
     }
-    let status = launch_with(&state, app, Slot::First, "match", false, false, &[], Some(env))?;
+    let status = launch_with(&state, app, Slot::First, launch::MATCH_MODE, false, false, &[], Some(env))?;
     let run = MatchRun {
         match_id: spec.match_id(),
         role: request.role,
@@ -1637,7 +1686,7 @@ pub(crate) fn launch_protocol_match(app: AppHandle, env: Vec<(String, String)>) 
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
     }
-    launch_with(&state, app.clone(), Slot::First, "match", false, false, &[], Some(env))
+    launch_with(&state, app.clone(), Slot::First, launch::MATCH_MODE, false, false, &[], Some(env))
 }
 
 #[derive(Serialize)]
@@ -1774,6 +1823,8 @@ pub struct WizardInfo {
     pub interrupted_step: Option<String>,
     /// What was put right at start after an interrupted installation (temporary files removed, previous game restored).
     pub recovered: Vec<String>,
+    /// The game version this launcher builds (`installer::gamever`).
+    pub game_version: &'static str,
     /// A first install on this PC: free space needed from the start, space taken at the end, estimated seconds, bytes
     /// downloaded (`installer::fresh_estimate`).
     pub fresh: FreshEstimate,
@@ -1816,6 +1867,7 @@ pub fn installer_info(app: AppHandle, state: St) -> WizardInfo {
         bundle: bundle.ok().as_deref().and_then(installer::bundle::load_manifest),
         interrupted_step: if active { None } else { st.as_ref().filter(|s| !s.finished).and_then(|s| s.current.clone()) },
         recovered,
+        game_version: installer::gamever::CURRENT.display,
         pending: p.pending && st.as_ref().is_some_and(|s| !s.finished),
         state_finished: st.as_ref().map(|s| s.finished),
         needs_reboot: st.as_ref().is_some_and(|s| s.needs_reboot),
@@ -2179,6 +2231,22 @@ pub fn installer_uninstall(state: St, dir: String, remove_saves: bool) -> AppRes
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_sub_ability_editor_needs_the_engine_capability_and_the_ability_list() {
+        let list = || vec!["Alpha".to_string(), "Beta".to_string()];
+        let g = gear_abilities_status(Some(true), list());
+        assert_eq!((g.supported, g.update_needed, g.abilities.len()), (true, false, 2));
+        // an engine without the capability: the game update is what the Locker asks for
+        let g = gear_abilities_status(Some(false), list());
+        assert_eq!((g.supported, g.update_needed, g.abilities.len()), (false, true, 0));
+        // the engine is fine but the ability list cannot be read (no keys file): not shown, and an update redoes it
+        let g = gear_abilities_status(Some(true), Vec::new());
+        assert_eq!((g.supported, g.update_needed), (false, true));
+        // no game installed: nothing to say
+        let g = gear_abilities_status(None, list());
+        assert_eq!((g.supported, g.update_needed), (false, false));
+    }
+
     use super::*;
 
     fn state(tag: &str, cfg: LauncherConfig) -> AppState {

@@ -45,8 +45,8 @@ documentation names them to say which game the software works with, and the engi
 *Tears of the Kingdom* recompilation) explains the others. The project's name, logo and interface are its own.
 
 Some **technical identifiers** contain such names: `totk.ini` (still read where there is no `kalamar.ini`),
-`totk.exe`, `totk_xlate.exe`, `splat3.exe`, the engine's target and folder names (`splatoon3-v1120`,
-`splatoon3-11.2.0`), the engine's `amiibo` module and the game-data identifiers exchanged with servers (mode keys, style
+`totk.exe`, `totk_xlate.exe`, `splat3.exe`, the engine's target and folder names (`splatoon3-v1130`,
+`splatoon3-11.3.0`; `splatoon3-v1120` and `splatoon3-11.2.0` for the version before), the engine's `amiibo` module and the game-data identifiers exchanged with servers (mode keys, style
 names, stage scene names). Renaming those breaks interfaces (the server protocol, existing installs); it has not been
 done. The environment variables are documented under the project's prefix, `KLM_*` (the older `TOTK_*` and `SPLAT3_*`
 names are still read), and the launcher's application identifier is `dev.kalamar.launcher` (the launcher moves a pre-release

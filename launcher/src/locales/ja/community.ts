@@ -617,6 +617,8 @@ export const community: CommunityDict = {
   "inc.launcher.spectate": "観戦席（ランチャーの更新が必要）",
   "m.runner.late": "マッチはすでに始まっていたため、ゲームは起動されませんでした（ゲームはもう観戦者を入れられません）。",
   "m.runner.confirm": "ゲームを起動してよいか、ランチャーが確認を待っています",
+  "m.runner.closing": "開いていたゲームを閉じています…",
+  "m.open_game": "マッチが始まると、開いているゲームは閉じられます。ゲーム内で保存していない内容は失われます。",
   "m.ask.title": "このマッチのためにゲームを起動しますか？",
   "m.ask.not_joined": "このサーバーは、あなたがこのランチャーから参加していないマッチのためにゲームを起動しようとしています（または参加後にランチャーが再起動しました）。",
   "m.ask.too_many": "このサーバーは短時間に何度もゲームを起動しています。もう一度起動しますか？",
@@ -645,4 +647,7 @@ export const community: CommunityDict = {
   "err.erase_name": "入力された名前が表示名と一致しません。",
   "err.export_write": "ファイルを書き込めませんでした（{message}）。",
   "err.bad_answer": "サーバーの応答を利用できません（{message}）。",
+  "m.ver.title": "お使いのゲームはバージョン {from} です。{to} に更新してください",
+  "m.ver.body": "オンラインプレイには Splatoon 3 {to} が必要ですが、このゲームは {from} です。ゲームを更新してから、ここに戻ってください。",
+  "m.ver.btn": "ゲームを更新",
 };

@@ -185,6 +185,7 @@ pub fn run() {
             commands::gamedata_cache_clear,
             commands::profile_load,
             commands::profile_save,
+            commands::gear_abilities_info,
             commands::server_card_preview,
             commands::server_card_import,
             commands::set_match_server,

@@ -24,6 +24,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// The `code` of a match that stopped because the game the player had open could not be closed (the page shows its
+/// own sentence for it; the server gets `launcher-failed` with the reason, as for any failed launch).
+pub const CODE_NOT_CLOSED: &str = "game-not-closed";
+
 /// The game process as the runner needs it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameRun {
@@ -40,8 +44,23 @@ pub trait GameHost: Send + Sync {
     fn launch(&self, env: Vec<(String, String)>) -> Result<(), String>;
     fn status(&self) -> GameRun;
     fn stop(&self);
+    /// What the game that is open stands for (`launch::open_game`): the launcher's own match in progress, or a game
+    /// started for solo play, which cannot play a match and is closed for it. `Nothing` by default.
+    fn open_game(&self) -> crate::launch::OpenGame {
+        crate::launch::OpenGame::Nothing
+    }
+    /// Closes the game opened for solo play: asks it to close, waits a few seconds, then terminates only that game.
+    /// Blocking (call off the runtime). `Err`: a sentence for the player.
+    fn close_open_game(&self) -> Result<(), String> {
+        Ok(())
+    }
     /// An opaque id of the game build (`PUT /v1/me/game`).
     fn build_id(&self) -> String;
+    /// The installed game was built for another game version than this launcher's (`installer::gamever`): it is
+    /// not declared to a server and takes part in no match; the player is asked for the game update instead.
+    fn game_outdated(&self) -> bool {
+        false
+    }
     /// The engine's capability list (`engine.rs`); may run the engine's listing once (blocking: call off the runtime).
     fn engine(&self) -> Option<EngineInfo> {
         None
@@ -59,6 +78,11 @@ pub trait GameHost: Send + Sync {
     fn current_loadout(&self) -> HashMap<String, String> {
         HashMap::new()
     }
+    /// The sub abilities the player chose in the Locker, by gear part (`head`, `clothes`, `shoes`), when the launcher
+    /// applies its profile: a match loadout that names gear for a part carries them (`contract::loadout_profile`).
+    fn current_sub_abilities(&self) -> HashMap<String, Vec<Option<String>>> {
+        HashMap::new()
+    }
     /// Developer tools only (`proto_peer --loadout-rules`): loadout constraints handled as if the match carried them
     /// (`rules.loadout`), to try the launcher's loadout path with a server that imposes none. The launcher never sets it.
     fn local_loadout_rules(&self) -> Option<Value> {
@@ -70,7 +94,7 @@ pub trait GameHost: Send + Sync {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RunnerStatus {
     pub match_id: String,
-    /// `checking`, `confirm` (the launcher asks its player before the launch, `consent`), `resolving`, `launching`, `continuing` (sent to the open game), `running`, `uploading`, `done`,
+    /// `checking`, `confirm` (the launcher asks its player before the launch, `consent`), `resolving`, `closing` (the game the player had open for solo play is closed), `launching`, `continuing` (sent to the open game), `running`, `uploading`, `done`,
     /// `waiting` (the game stays open for the next round), `refused`, `failed`, `closed`.
     pub phase: String,
     /// The game's last state from its status file.
@@ -363,8 +387,13 @@ impl Runner {
         let info = tokio::task::spawn_blocking(move || host.engine()).await.ok().flatten();
         let caps = engine::caps(info.as_ref());
         // A game that does not know the engine's listing cannot join or host by itself: refused before any launch.
-        if crate::proto::freshness::engine_too_old(info.as_ref()) {
-            let reason = "the installed game is too old for the automatic match (no --list-match-options): recompile it from the launcher".to_string();
+        let other_version = self.host.game_outdated();
+        if other_version || crate::proto::freshness::engine_too_old(info.as_ref()) {
+            let reason = if other_version {
+                format!("the installed game is not Splatoon 3 {}: update the game from the launcher", crate::installer::gamever::CURRENT.display)
+            } else {
+                "the installed game is too old for the automatic match (no --list-match-options): recompile it from the launcher".to_string()
+            };
             st.phase = "refused".into();
             st.code = Some(contract::ERR_INCOMPATIBLE.into());
             st.reason = Some(reason.clone());
@@ -555,6 +584,7 @@ impl Runner {
             // deadline, then the current item (when it complies) or the first allowed one is taken.
             if !plan.loadout.is_empty() {
                 let current = self.host.current_loadout();
+                let subs = self.host.current_sub_abilities();
                 let mine = |me: &Self| lock(&me.picks).get(&id).cloned().unwrap_or_default();
                 let (_, open) = contract::resolve_loadout(&plan.loadout, &mine(&self), &current, false);
                 if !open.is_empty() {
@@ -571,7 +601,7 @@ impl Runner {
                 let (chosen, _) = contract::resolve_loadout(&plan.loadout, &mine(&self), &current, true);
                 let file = paths.dir.join(format!("loadout-{}.json", plan.match_id));
                 if !chosen.is_empty() {
-                    if let Err(e) = crate::util::atomic_write(&file, contract::loadout_profile(&chosen).to_string().as_bytes()) {
+                    if let Err(e) = crate::util::atomic_write(&file, contract::loadout_profile(&chosen, &subs).to_string().as_bytes()) {
                         st.phase = "failed".into();
                         st.code = Some(contract::ERR_FAILED.into());
                         st.reason = Some(format!("the match loadout could not be written: {e}"));
@@ -583,6 +613,30 @@ impl Runner {
                     env.push(("SPLAT3_MATCH_LOADOUT".into(), file.display().to_string()));
                 }
                 st.loadout = Some(Value::Object(chosen.iter().map(|(s, x)| (s.clone(), Value::String(x.clone()))).collect()));
+            }
+            // 4c. A game the player opened for solo play cannot play the match: it is closed first (asked, then terminated
+            // after a few seconds, only that game), within the launch deadline. The launcher's own match in progress is
+            // not touched: it keeps the wait and the refusal below.
+            if self.host.open_game() == crate::launch::OpenGame::Solo {
+                st.phase = "closing".into();
+                self.publish(&st);
+                let host = self.host.clone();
+                let closed = tokio::task::spawn_blocking(move || host.close_open_game()).await.unwrap_or_else(|e| Err(e.to_string()));
+                if let Err(why) = closed {
+                    st.phase = "failed".into();
+                    st.code = Some(CODE_NOT_CLOSED.into());
+                    st.reason = Some(why.clone());
+                    self.publish(&st);
+                    self.report_error(&id, plan.version, &plan.match_id, contract::ERR_FAILED, &why).await;
+                    self.finish(&id);
+                    return;
+                }
+                if self.ended(&id) {
+                    st.phase = "closed".into();
+                    self.publish(&st);
+                    self.finish(&id);
+                    return;
+                }
             }
             st.env = crate::launch::shown_env(&env);
             st.phase = "launching".into();
@@ -611,7 +665,7 @@ impl Runner {
             let body = match &st.loadout {
                 Some(Value::Object(l)) if !l.is_empty() => {
                     let chosen: Vec<(String, String)> = l.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect();
-                    let mut p = contract::loadout_profile(&chosen);
+                    let mut p = contract::loadout_profile(&chosen, &HashMap::new()); // what the server is told: ids only
                     if let Some(o) = p.as_object_mut() {
                         o.remove("version");
                     }

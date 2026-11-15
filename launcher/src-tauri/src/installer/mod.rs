@@ -8,7 +8,7 @@
 //! <I>\src\                        the runtime source shipped with the launcher (+ kit-tools\)
 //! <I>\tools\                      Python, llvm-mingw, Ninja, the libraries, hactool (`portable`, `prebuilt`)
 //! <I>\work\xlate\totk_xlate.exe   the shader translator (shipped with the launcher)
-//! <I>\work\splatoon3-11.2.0\      the game root the launcher uses: exefs\, romfs\, build\splat3.exe, userdata\
+//! <I>\work\splatoon3-11.3.0\      the game root the launcher uses: exefs\, romfs\, build\splat3.exe, userdata\
 //! ```
 //!
 //! A first install puts nothing outside that folder: no system tool, no administrator prompt, no winget. Installs made
@@ -24,6 +24,7 @@
 //! whenever that step stops, normally or not.
 
 pub mod bundle;
+pub mod gamever;
 pub mod incremental;
 pub mod nsp;
 pub mod portable;
@@ -42,8 +43,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const GAME_DIR: &str = "splatoon3-11.2.0";
-pub const TARGET: &str = "splatoon3-v1120";
+pub const GAME_DIR: &str = gamever::CURRENT.game_dir;
+pub const TARGET: &str = gamever::CURRENT.target;
 /// Executable suffix: `.exe` on Windows, nothing on Linux (`build_game.py` names the target's executable
 /// `splat3` + `.exe` only on Windows).
 pub const EXE_SUFFIX: &str = if cfg!(windows) { ".exe" } else { "" };
@@ -173,6 +174,10 @@ impl Layout {
     }
     pub fn game(&self) -> PathBuf {
         self.work().join(GAME_DIR)
+    }
+    /// The game folder of the version before this one (`gamever::PREVIOUS`), when the install still has it.
+    pub fn previous_game(&self) -> Option<PathBuf> {
+        gamever::previous_game(&self.root)
     }
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
@@ -351,6 +356,9 @@ pub struct StepRecord {
 pub struct StateFile {
     pub schema: u32,
     pub tool: String,
+    /// The engine target (`TARGET`) the game steps of this state were done for; empty in a state written before the
+    /// game version was recorded (those installs are for the previous version: `gamever::PREVIOUS`).
+    pub target: String,
     pub created: u64,
     pub updated: u64,
     pub source_commit: String,
@@ -392,6 +400,31 @@ impl StateFile {
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         crate::util::atomic_write(path, text.as_bytes()).map_err(|e| std::io::Error::other(e.to_string()))
+    }
+    /// Puts a state made for another game version right: the steps that read or build the game (ExeFS, RomFS,
+    /// generated C, executable, save keys) are forgotten, with their input digests, so none is skipped on the strength
+    /// of the old version's results; the tools (downloads, Python, hactool, the shader translator) stay. Returns
+    /// whether anything changed. A state with no steps (a first install) only gets the target.
+    pub fn retarget(&mut self, target: &str) -> bool {
+        if self.target == target {
+            return false;
+        }
+        let had_game = !self.steps.is_empty();
+        self.target = target.to_string();
+        if !had_game {
+            return false;
+        }
+        for id in [StepId::Exefs, StepId::Romfs, StepId::Lift, StepId::Compile, StepId::Keys, StepId::Layout, StepId::Selftest, StepId::Cleanup] {
+            self.steps.remove(id.name());
+        }
+        self.lift_inputs.clear();
+        self.compile_inputs.clear();
+        self.keys_inputs.clear();
+        self.previous_commit.clear();
+        self.finished = false;
+        self.last_error = None;
+        self.current = None;
+        true
     }
     pub fn done_with(&self, step: StepId, commit: &str) -> bool {
         self.steps.get(step.name()).is_some_and(|r| r.status == "done" && (!step.source_bound() || r.commit == commit))
@@ -782,9 +815,11 @@ impl Run {
         let lay = Layout::new(&req.install_dir);
         let manifest = bundle_dir.as_deref().and_then(bundle::load_manifest);
         let jobs = if req.jobs == 0 { default_jobs() } else { req.jobs.clamp(1, 64) };
+        let mut state = StateFile::load(&lay.state()).unwrap_or_default();
+        state.retarget(TARGET);
         Run {
             inst,
-            state: StateFile::load(&lay.state()).unwrap_or_default(),
+            state,
             lay,
             req,
             bundle_dir,
@@ -1930,10 +1965,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_state_of_another_game_version_keeps_the_tools_and_forgets_the_game() {
+        let rec = |c: &str| StepRecord { status: "done".into(), commit: c.into(), ..Default::default() };
+        let mut st = StateFile { finished: true, keys_inputs: "k".into(), lift_inputs: "l".into(), compile_inputs: "c".into(), previous_commit: "p".into(), ..Default::default() };
+        for id in StepId::ALL {
+            st.steps.insert(id.name().into(), rec("c0"));
+        }
+        assert!(st.retarget(TARGET));
+        let kept: Vec<&str> = st.steps.keys().map(String::as_str).collect();
+        assert_eq!(kept, ["checks", "hactool", "prereqs", "python", "sources", "xlate"]);
+        assert!(!st.finished && st.keys_inputs.is_empty() && st.lift_inputs.is_empty() && st.compile_inputs.is_empty() && st.previous_commit.is_empty());
+        assert!(!st.done_with(StepId::Keys, "c0") && !st.done_with(StepId::Compile, "c0") && st.done_with(StepId::Xlate, "c0"));
+        assert_eq!(st.target, TARGET);
+        // the same game version again: nothing is touched; and a first install only records the target
+        assert!(!st.retarget(TARGET));
+        let mut fresh = StateFile::default();
+        assert!(!fresh.retarget(TARGET) && fresh.target == TARGET);
+    }
+
+    #[test]
     fn version_hash_comes_from_targets_py() {
-        let text = "TARGETS = {\n  'other': {'main': 'aa'},\n  'splatoon3-v1120': {\n    'game': 'Splatoon 3',\n    'main':  'E20596A523990DD8B31DC452C7D9BAA89B409927EC10ED9B956806774521629C', }}";
-        assert_eq!(expected_main_sha(text, TARGET).unwrap(), "e20596a523990dd8b31dc452c7d9baa89b409927ec10ed9b956806774521629c");
-        assert!(expected_main_sha("'splatoon3-v1120': {'main': 'abc'}", TARGET).is_none());
+        let text = format!("TARGETS = {{\n  'other': {{'main': 'aa'}},\n  '{TARGET}': {{\n    'game': 'Splatoon 3',\n    'main':  'E20596A523990DD8B31DC452C7D9BAA89B409927EC10ED9B956806774521629C', }}}}");
+        assert_eq!(expected_main_sha(&text, TARGET).unwrap(), "e20596a523990dd8b31dc452c7d9baa89b409927ec10ed9b956806774521629c");
+        assert!(expected_main_sha(&format!("'{TARGET}': {{'main': 'abc'}}"), TARGET).is_none());
         assert!(expected_main_sha("nothing", TARGET).is_none());
     }
 
@@ -1948,8 +2002,8 @@ mod tests {
     #[cfg(windows)]
     fn layout_matches_the_kit() {
         let l = Layout::new(r"C:\I");
-        assert_eq!(l.game(), Path::new(r"C:\I\work\splatoon3-11.2.0"));
-        assert_eq!(l.game_exe(), Path::new(r"C:\I\work\splatoon3-11.2.0\build\splat3.exe"));
+        assert_eq!(l.game(), Path::new(r"C:\I\work\splatoon3-11.3.0"));
+        assert_eq!(l.game_exe(), Path::new(r"C:\I\work\splatoon3-11.3.0\build\splat3.exe"));
         assert_eq!(l.xlate_exe(), Path::new(r"C:\I\work\xlate\totk_xlate.exe"));
         // the launcher's own rule for the translator finds the wizard's
         assert_eq!(crate::install::translator_path(&l.game(), None), l.xlate_exe());
@@ -2120,19 +2174,19 @@ mod tests {
             let mut g = inst.lock();
             g.snap.active = true;
             g.snap.install_dir = Some(r"C:\K".into());
-            g.snap.game_root = Some(r"C:\K\work\splatoon3-11.2.0".into());
+            g.snap.game_root = Some(r"C:\K\work\splatoon3-11.3.0".into());
         }
-        assert_eq!(inst.target_root(), Some(PathBuf::from(r"C:\K\work\splatoon3-11.2.0")));
+        assert_eq!(inst.target_root(), Some(PathBuf::from(r"C:\K\work\splatoon3-11.3.0")));
         assert!(inst.game_data_root().is_none(), "not before the merge is complete");
         inst.lock().snap.game_data = true;
-        assert_eq!(inst.game_data_root(), Some(PathBuf::from(r"C:\K\work\splatoon3-11.2.0")));
+        assert_eq!(inst.game_data_root(), Some(PathBuf::from(r"C:\K\work\splatoon3-11.3.0")));
         // a launch of that game waits only while its executable is being replaced
-        assert!(!inst.replacing(Path::new(r"C:\K\work\splatoon3-11.2.0")));
+        assert!(!inst.replacing(Path::new(r"C:\K\work\splatoon3-11.3.0")));
         inst.lock().snap.replacing = true;
-        assert!(inst.replacing(Path::new(r"c:\k\work\splatoon3-11.2.0\")));
-        assert!(!inst.replacing(Path::new(r"C:\Other\work\splatoon3-11.2.0")));
+        assert!(inst.replacing(Path::new(r"c:\k\work\splatoon3-11.3.0\")));
+        assert!(!inst.replacing(Path::new(r"C:\Other\work\splatoon3-11.3.0")));
         inst.lock().snap.active = false;
-        assert!(!inst.replacing(Path::new(r"C:\K\work\splatoon3-11.2.0")));
+        assert!(!inst.replacing(Path::new(r"C:\K\work\splatoon3-11.3.0")));
     }
 
     #[test]

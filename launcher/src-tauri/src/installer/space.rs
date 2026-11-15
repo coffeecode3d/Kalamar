@@ -6,9 +6,9 @@
 use super::StepId;
 
 pub const GB: u64 = 1_000_000_000;
-/// The merged RomFS of 11.2.0 (romfs.bin, index.json).
-pub const ROMFS: u64 = super::nsp::ROMFS_SIZE_1120 + 3_000_000;
-/// Generated C of 11.2.0 (1.53 GB measured).
+/// The merged RomFS of the current game version (romfs.bin, index.json).
+pub const ROMFS: u64 = super::gamever::CURRENT.romfs_size + 3_000_000;
+/// Generated C of the current game version (1.53 GB measured).
 pub const LIFT: u64 = 1_550_000_000;
 /// The build folder: objects (0.43 GB), splat3.exe (0.36 GB), its map, the RomFS index and the DLLs (0.84 GB measured).
 pub const BUILD: u64 = 850_000_000;

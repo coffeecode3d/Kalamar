@@ -9,6 +9,11 @@
 //!   in this launcher (the bundled `runtime-src.json`, from `resources\` or the copy embedded in the executable, against the compile step's record in the install state file), or
 //!   its listing is older than the contract-2 one.
 //!
+//! * **Another game version** (blocking, the same state as "too old"): the installed game is the previous version
+//!   (`installer::gamever`), built before the game was updated. It still starts for offline play, but its build differs
+//!   from every current one: it is not declared to a server, no match is accepted with it, and the page asks for the
+//!   game update. `old_version` names it.
+//!
 //! A listing that failed for another reason (no answer in time, the executable cannot be run, no executable) proves
 //! nothing about the build: the level is `unknown` and nothing is blocked.
 
@@ -41,16 +46,31 @@ pub struct GameCheck {
     /// Runtime commit embedded in this launcher.
     pub bundled_commit: Option<String>,
     pub note: Option<String>,
+    /// The installed game is for this other version (`level` is then `too_old`): the game update to
+    /// `needed_version` is what is asked of the player.
+    pub old_version: Option<String>,
+    pub needed_version: &'static str,
 }
 
 /// The assessment. `has_exe`: the game executable exists.
-pub fn assess(info: Option<&EngineInfo>, has_exe: bool, installed: Option<&str>, bundled: Option<&str>) -> GameCheck {
+pub fn assess(info: Option<&EngineInfo>, has_exe: bool, installed: Option<&str>, bundled: Option<&str>, old_version: Option<&str>) -> GameCheck {
     let installed_commit = installed.filter(|c| !c.is_empty()).map(str::to_string);
     let bundled_commit = bundled.filter(|c| !c.is_empty()).map(str::to_string);
     let note = info.and_then(|i| i.note.clone());
-    let base = |level: &'static str, outdated: bool| GameCheck { level, outdated, installed_commit: installed_commit.clone(), bundled_commit: bundled_commit.clone(), note: note.clone() };
+    let base = |level: &'static str, outdated: bool| GameCheck {
+        level,
+        outdated,
+        installed_commit: installed_commit.clone(),
+        bundled_commit: bundled_commit.clone(),
+        note: note.clone(),
+        old_version: old_version.map(str::to_string),
+        needed_version: crate::installer::gamever::CURRENT.display,
+    };
     if !has_exe {
         return base("missing", false);
+    }
+    if old_version.is_some() {
+        return base("too_old", true);
     }
     if engine_too_old(info) {
         return base("too_old", true);
@@ -96,24 +116,38 @@ mod tests {
     #[test]
     fn levels() {
         let old = info(None, Some("the engine has no --list-match-options (exit code Some(1))"));
-        let c = assess(Some(&old), true, Some("aaa"), Some("aaa"));
+        let c = assess(Some(&old), true, Some("aaa"), Some("aaa"), None);
         assert_eq!((c.level, c.outdated), ("too_old", true));
-        let c = assess(Some(&info(None, Some("no answer within 90 s"))), true, None, Some("bbb"));
+        let c = assess(Some(&info(None, Some("no answer within 90 s"))), true, None, Some("bbb"), None);
         assert_eq!((c.level, c.outdated), ("unknown", false));
-        let c = assess(Some(&old), false, None, None);
+        let c = assess(Some(&old), false, None, None, None);
         assert_eq!((c.level, c.outdated), ("missing", false));
         let ok = info(Some(listing(2)), None);
-        assert!(!assess(Some(&ok), true, Some("aaa"), Some("aaa")).outdated);
-        let c = assess(Some(&ok), true, Some("aaa"), Some("bbb"));
+        assert!(!assess(Some(&ok), true, Some("aaa"), Some("aaa"), None).outdated);
+        let c = assess(Some(&ok), true, Some("aaa"), Some("bbb"), None);
         assert_eq!((c.level, c.outdated, c.installed_commit.as_deref(), c.bundled_commit.as_deref()), ("ok", true, Some("aaa"), Some("bbb")));
         // The pre-release installer's builds are older than whatever this launcher carries.
-        assert!(assess(Some(&ok), true, Some("kit"), Some("bbb")).outdated);
+        assert!(assess(Some(&ok), true, Some("kit"), Some("bbb"), None).outdated);
         // No record of the compiled commit: nothing to compare.
-        assert!(!assess(Some(&ok), true, None, Some("bbb")).outdated);
+        assert!(!assess(Some(&ok), true, None, Some("bbb"), None).outdated);
         // A listing without the contract-2 result: a recompilation brings the newer one.
         let v1 = info(Some(listing(1)), None);
-        let c = assess(Some(&v1), true, Some("bbb"), Some("bbb"));
+        let c = assess(Some(&v1), true, Some("bbb"), Some("bbb"), None);
         assert_eq!((c.level, c.outdated), ("ok", true));
+    }
+
+    #[test]
+    fn a_game_of_another_version_is_blocked_like_a_game_too_old() {
+        let ok = info(Some(listing(2)), None);
+        // Whatever the engine's listing says, the previous version's game does not take part in online play.
+        let c = assess(Some(&ok), true, Some("aaa"), Some("aaa"), Some("11.2.0"));
+        assert_eq!((c.level, c.outdated, c.old_version.as_deref(), c.needed_version), ("too_old", true, Some("11.2.0"), crate::installer::gamever::CURRENT.display));
+        let c = assess(None, true, None, None, Some("11.2.0"));
+        assert_eq!(c.level, "too_old");
+        // No executable: nothing to say about its version.
+        assert_eq!(assess(None, false, None, None, Some("11.2.0")).level, "missing");
+        // The current version has no old version to name.
+        assert_eq!(assess(Some(&ok), true, Some("aaa"), Some("aaa"), None).old_version, None);
     }
 
     #[test]

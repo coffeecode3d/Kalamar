@@ -11,6 +11,7 @@ import { StageStrip } from "../stages";
 import { localeOf } from "../locales";
 import { IconCheck, IconClose } from "../icons";
 import { useApp } from "../ctx";
+import { OpenGameNotice } from "./OpenGame";
 
 const SELECTIONS = ["random", "rotation", "fixed", "vote", "game"];
 
@@ -32,6 +33,7 @@ function Ticket({ ticket, queues }: { ticket: J; queues: J[] }) {
           {ticket.state === "searching" && hint.here !== null && ` · ${c("q.ticket.here", { n: hint.here })}`}
         </p>
         {ticket.state === "searching" && <p className="small" role="status">{c(`q.hint.${hint.reason}` as CKey, { list })}</p>}
+        <OpenGameNotice />
         <ErrorLine text={a.error} />
       </div>
       {ticket.state === "searching" && <button className="btn btn-ghost" disabled={a.busy} onClick={() => void a.run(async () => { await req("DELETE", "/v1/tickets/current"); setLive({ ticket: null }); })}>{c("q.cancel")}</button>}

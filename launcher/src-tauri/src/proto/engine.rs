@@ -24,6 +24,9 @@ pub const FORMAT: &str = "splat3-match-options";
 pub const MAX_OPTIONS_BYTES: usize = 48 * 1024;
 const MAX_OUTPUT: usize = 1 << 20;
 const LIST_TIMEOUT: Duration = Duration::from_secs(90);
+/// The capability an engine names in the `capabilities` array of its list when its save profile applies the sub
+/// abilities of the equipped gear (`gear_abilities`) and the ability chunk stock (`chunks`).
+pub const CAP_GEAR_ABILITIES: &str = "gear-abilities";
 /// The automatic match's mode keys before the engine listed its own (contract 1).
 pub const DEFAULT_MODES: &[&str] = crate::proto::contract::MODES;
 
@@ -55,8 +58,8 @@ pub fn list_lang(ui: &str) -> &'static str {
     }
 }
 
-/// The game version the runtime targets (`installer::GAME_DIR`).
-pub const GAME_VERSION: &str = "11.2.0";
+/// The game version the runtime targets (`installer::gamever`, the one place that names it).
+pub const GAME_VERSION: &str = crate::installer::gamever::CURRENT.display;
 
 /// `build` of `PUT /v1/me/game` (protocol 1.1.12: a build, never an installation): the launcher's version, the engine
 /// snapshot the game was compiled from (the first 12 hex digits of its identifier; `kit` for builds made by the
@@ -238,6 +241,9 @@ pub struct Caps {
     pub rounds_faster: bool,
     /// The engine's `stage_list`: `all` (every listed stage, whatever the save) or `host_save` (older engines).
     pub stage_list: String,
+    /// The engine applies `gear_abilities` and `chunks` of a save profile: its list's `capabilities` names
+    /// [`CAP_GEAR_ABILITIES`]. An engine that does not name it may ignore both fields without a word.
+    pub gear_abilities: bool,
 }
 
 fn id_text(v: &Value) -> Option<String> {
@@ -311,6 +317,7 @@ pub fn caps(info: Option<&EngineInfo>) -> Caps {
         },
         rounds_faster: o.pointer("/rounds/faster_than_restart").and_then(Value::as_bool) == Some(true),
         stage_list: if all_stages { "all".into() } else { "host_save".into() },
+        gear_abilities: o.get("capabilities").and_then(Value::as_array).is_some_and(|a| a.iter().any(|c| c.as_str() == Some(CAP_GEAR_ABILITIES))),
     }
 }
 
@@ -385,6 +392,21 @@ mod tests {
     }
 
     #[test]
+    fn the_gear_abilities_capability_is_read_from_the_lists_capabilities() {
+        let info = |o: Value| EngineInfo { fingerprint: "f".into(), options: Some(o), room_stages: None, note: None, lang: None };
+        assert!(!caps(Some(&info(sample()))).gear_abilities, "a list without the member: an older engine");
+        let mut o = sample();
+        o["capabilities"] = json!(["something-else"]);
+        assert!(!caps(Some(&info(o.clone()))).gear_abilities);
+        o["capabilities"] = json!(["something-else", CAP_GEAR_ABILITIES]);
+        assert!(caps(Some(&info(o.clone()))).gear_abilities);
+        o["capabilities"] = json!("gear-abilities");
+        assert!(!caps(Some(&info(o))).gear_abilities, "an array is expected");
+        assert!(!caps(None).gear_abilities);
+        assert_eq!(CAP_GEAR_ABILITIES, "gear-abilities");
+    }
+
+    #[test]
     fn the_engines_list_gives_contract_2_and_its_limits() {
         let v = parse_options(format!("log line before\n{}", sample()).as_bytes()).unwrap();
         let info = EngineInfo { fingerprint: "f".into(), options: Some(v), room_stages: None, note: None, lang: None };
@@ -454,7 +476,7 @@ mod tests {
         let c = caps(None);
         assert_eq!((c.contract_versions.clone(), c.modes.len(), c.listed), (vec![1], 5, false));
         let b = game_body(&build_label(None), None, true);
-        assert_eq!(b["build"], format!("kalamar/{} runtime/unknown game/11.2.0", env!("CARGO_PKG_VERSION")));
+        assert_eq!(b["build"], format!("kalamar/{} runtime/unknown game/{GAME_VERSION}", env!("CARGO_PKG_VERSION")));
         assert_eq!(b["contract"]["version"], 1);
         assert!(b.get("engine").is_none() && b.get("options").is_none());
         assert_eq!(b["launcher"]["draft"], json!([1]), "the draft screen does not depend on the engine");
@@ -508,11 +530,12 @@ mod tests {
     #[test]
     fn the_declared_build_names_a_build_never_an_installation() {
         let v = env!("CARGO_PKG_VERSION");
-        assert_eq!(build_label(Some("4cb0304a1b2c3d4e5f60718293a4b5c6d7e8f901")), format!("kalamar/{v} runtime/4cb0304a1b2c game/11.2.0"));
-        assert_eq!(build_label(Some("4CB0304")), format!("kalamar/{v} runtime/4cb0304 game/11.2.0"));
-        assert_eq!(build_label(Some("kit")), format!("kalamar/{v} runtime/kit game/11.2.0"));
+        assert_eq!(build_label(Some("4cb0304a1b2c3d4e5f60718293a4b5c6d7e8f901")), format!("kalamar/{v} runtime/4cb0304a1b2c game/11.3.0"));
+        assert_eq!(GAME_VERSION, "11.3.0", "the build label names the game version the launcher builds");
+        assert_eq!(build_label(Some("4CB0304")), format!("kalamar/{v} runtime/4cb0304 game/{GAME_VERSION}"));
+        assert_eq!(build_label(Some("kit")), format!("kalamar/{v} runtime/kit game/{GAME_VERSION}"));
         for odd in [None, Some(""), Some("C:\\Users\\someone\\splat3.exe"), Some("exe-1a2b-6543210f"), Some("abc")] {
-            assert_eq!(build_label(odd), format!("kalamar/{v} runtime/unknown game/11.2.0"), "{odd:?}");
+            assert_eq!(build_label(odd), format!("kalamar/{v} runtime/unknown game/{GAME_VERSION}"), "{odd:?}");
         }
         // Two installations of the same build (other sizes and dates on disk) declare the same thing.
         let d = std::env::temp_dir().join(format!("s3l-build-{}", crate::util::random_hex(4)));

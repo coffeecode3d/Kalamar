@@ -27,6 +27,7 @@
 #include "fs.h"
 #include "host.h"
 #include "save_profile.h"
+#include "splat3_addr.h"
 #include "platform/platform.h"
 #include "ui/menu.h"
 
@@ -659,7 +660,7 @@ typedef struct { uint8_t *b; size_t n; uint32_t keys, strs; const uint8_t *rows;
 static int table_load(Table *t, const char *name) {
     memset(t, 0, sizeof *t);
     char rel[128];
-    snprintf(rel, sizeof rel, "RSDB/%s.Product.b20.rstbl.byml.zs", name);
+    snprintf(rel, sizeof rel, "RSDB/%s.Product.%s.rstbl.byml.zs", name, splat3_romfs_tag());
     size_t zn = 0;
     void *z = romfs_read_original_file(rel, &zn);
     if (!z) return 0;
@@ -947,8 +948,8 @@ static int own(Plain *p, Log *l, const char *pth, int64_t item, int kind, int64_
     return 1;
 }
 
-// The ability enum's value of a gear's main ability name, from main's reflection string of the enum.
-static int64_t ability(const char *name) {
+// The ability enum's reflection string in main ("None = -1 , <name> = 0 , ..."), NULL when main has none.
+static const char *ability_enum(void) {
     static const char *enum_s;
     if (!enum_s) {
         const RtLoaded *m = ldr_module(0);
@@ -956,15 +957,118 @@ static int64_t ability(const char *name) {
         for (uint64_t a = m->base + m->text_end; a + 64 < m->base + m->data_off && !enum_s; a++)
             if (*(const char *)(uintptr_t)a == 'N' && !memcmp((const void *)(uintptr_t)a, first, strlen(first)))
                 enum_s = (const char *)(uintptr_t)a;
-        if (!enum_s) return -2;
     }
-    size_t n = strlen(name);
-    for (const char *s = enum_s; *s;) {
-        while (*s == ' ' || *s == ',') s++;
-        if (!strncmp(s, name, n) && s[n] == ' ') return strtoll(strchr(s, '=') + 1, NULL, 10);
-        s += strcspn(s, ",");
-    }
+    return enum_s;
+}
+
+// The next "<name> = <value>" entry of an enum string at *s: 1 with its name's span and value, 0 at the end.
+static int enum_next(const char **s, const char **name, size_t *len, int64_t *v) {
+    const char *q = *s;
+    while (*q == ' ' || *q == ',') q++;
+    const char *eq = strchr(q, '=');
+    if (!*q || !eq) return 0;
+    *name = q, *len = strcspn(q, " =");
+    *v = strtoll(eq + 1, NULL, 10);
+    *s = eq + strcspn(eq, ",");
+    return 1;
+}
+
+// The value of name in the enum string e, -2 when e is NULL or has no such name.
+static int64_t enum_value(const char *e, const char *name) {
+    const char *nm;
+    size_t len, n = strlen(name);
+    int64_t v;
+    while (e && enum_next(&e, &nm, &len, &v))
+        if (len == n && !memcmp(nm, name, n)) return v;
     return -2;
+}
+
+static int enum_has(const char *e, int64_t value) {
+    const char *nm;
+    size_t len;
+    int64_t v;
+    while (e && enum_next(&e, &nm, &len, &v))
+        if (v == value) return 1;
+    return 0;
+}
+
+// The ability enum's value of a gear's main ability name, from main's reflection string of the enum.
+static int64_t ability(const char *name) { return enum_value(ability_enum(), name); }
+
+int64_t save_profile_ability_at(int pos) {
+    const char *e = ability_enum(), *nm;
+    size_t len;
+    int64_t v;
+    for (int i = 0; e && enum_next(&e, &nm, &len, &v); i++)
+        if (i == pos) return v;
+    return -2;
+}
+
+// ---- gear_abilities: the three sub abilities of the equipped head, clothes and shoes.
+// A sub slot of the save (ExSkillArray) holds an ability enum value, -1 when empty. The enum numbers the abilities a
+// sub slot can hold from 0 and the ones only a gear's main slot has from SUB_ABILITY_END.
+#define SUB_ABILITY_END 100
+#define SUB_SLOTS 3
+static const char *const gear_part_names[] = {"head", "clothes", "shoes"};
+
+// The profile's gear_abilities against the enum string e: has[part] and sub[part][slot] (-1: empty). NULL when it
+// is absent or well formed, else what is wrong (in why).
+static const char *gear_subs_parse(const Json *J, const char *e, int has[3], int64_t sub[3][SUB_SLOTS], char *why,
+                                   size_t cap) {
+    memset(has, 0, 3 * sizeof *has);
+    const Json *ga = jget(J, "gear_abilities");
+    if (!ga || ga->kind == J_NULL) return NULL;
+    if (ga->kind != J_OBJ) return "gear_abilities must be an object {\"head\": [a, b, c], \"clothes\": ..., \"shoes\": ...}";
+    for (int i = 0; i < ga->n; i++) {
+        int known = 0;
+        for (int g = 0; g < 3; g++) known |= !strcmp(ga->kids[i].key, gear_part_names[g]);
+        if (!known) return snprintf(why, cap, "gear_abilities has an unknown part \"%.40s\" (head, clothes, shoes)", ga->kids[i].key), why;
+    }
+    if (!e) return "the ability names were not found in main";
+    for (int g = 0; g < 3; g++) {
+        const Json *a = jget(ga, gear_part_names[g]);
+        if (!a || a->kind == J_NULL) continue;
+        if (a->kind != J_ARR || a->n != SUB_SLOTS)
+            return snprintf(why, cap, "gear_abilities.%s must be an array of %d abilities", gear_part_names[g], SUB_SLOTS), why;
+        for (int k = 0; k < SUB_SLOTS; k++) {
+            const Json *x = &a->kids[k];
+            int64_t v;
+            if (x->kind == J_NULL) v = -1;
+            else if (x->kind == J_STR) {
+                v = enum_value(e, x->str);
+                if (v == -2)
+                    return snprintf(why, cap, "gear_abilities.%s[%d]: the game has no ability named \"%.40s\"",
+                                    gear_part_names[g], k, x->str), why;
+            } else if (x->kind == J_NUM && x->num == (double)(int64_t)x->num) {
+                v = (int64_t)x->num;
+                if (!enum_has(e, v))
+                    return snprintf(why, cap, "gear_abilities.%s[%d]: %lld is not a value of the game's ability enum",
+                                    gear_part_names[g], k, (long long)v), why;
+            } else {
+                return snprintf(why, cap, "gear_abilities.%s[%d] must be an ability name, an enum value or null",
+                                gear_part_names[g], k), why;
+            }
+            if (v < -1 || v >= SUB_ABILITY_END)
+                return snprintf(why, cap, "gear_abilities.%s[%d]: ability %lld is one only a main slot has, not a sub slot",
+                                gear_part_names[g], k, (long long)v), why;
+            sub[g][k] = v;
+        }
+        has[g] = 1;
+    }
+    return NULL;
+}
+
+int save_profile_gear_abilities_check(const char *json, const char *enum_s, int64_t sub[3][3], char *why, size_t cap) {
+    Json j;
+    int has[3] = {0}, mask = -1;
+    char buf[200] = "";
+    jp = json;
+    const char *bad = json_parse(&j) && j.kind == J_OBJ ? gear_subs_parse(&j, enum_s, has, sub, buf, sizeof buf)
+                                                        : "not a JSON object";
+    if (!bad) mask = has[0] | has[1] << 1 | has[2] << 2;
+    if (why && cap) snprintf(why, cap, "%s", bad ? bad : "");
+    json_free(&j);
+    return mask;
 }
 
 typedef struct { const char *part, *table, *equip, *map; } GearPart;
@@ -1110,6 +1214,79 @@ static int apply_appearance(const Json *J, Plain *p, Log *l, int *complete) {
     return 1;
 }
 
+// gear_abilities: the sub abilities of the equipped pieces (the save's Coordinates, after the profile's gear), written
+// into their records of the player data's ownership maps, the only place the save keeps a piece's abilities. A piece
+// with fewer than three slots gets three, and its Rarity (the save's star count, which the game ties the slot count
+// to: rarity + 1 slots up to three) is raised to match.
+static int apply_gear_abilities(const Json *J, Plain *p, Log *l) {
+    int has[3];
+    int64_t sub[3][SUB_SLOTS];
+    char why[200];
+    const char *bad = gear_subs_parse(J, ability_enum(), has, sub, why, sizeof why);
+    if (bad) return fail(bad, 0);
+    for (int g = 0; g < 3; g++) {
+        if (!has[g]) continue;
+        const GearPart *gp = &gear_parts[g];
+        char q[96];
+        int64_t id;
+        if (!current(p, gp->equip, &id)) return fail("the save has no equipped gear where 11.2.0 has it", g);
+        snprintf(q, sizeof q, "1/%s", gp->map);
+        Mp *rec = mp_get(path(p, q), id);
+        Mp *r = mp_get(rec, name_hash("Rarity")), *a = mp_get(rec, name_hash("ExSkillArray"));
+        if (!r || r->kind != M_INT || !a || a->kind != M_ARR)
+            return fail("gear_abilities: the save does not own the equipped gear (give it in \"gear\" too)", id);
+        int same = a->n == SUB_SLOTS;
+        for (uint32_t k = 0; same && k < SUB_SLOTS; k++) same = a->kids[k].kind == M_INT && a->kids[k].i == sub[g][k];
+        if (!same) {
+            Mp slot = a->n && a->kids[0].kind == M_INT ? a->kids[0] : new_int(-1);   // the game's encoding of a slot
+            Mp *kids = calloc(SUB_SLOTS, sizeof *kids);
+            if (!kids) return fail("out of memory", 0);
+            for (uint32_t k = 0; k < a->n; k++) mp_free(&a->kids[k]);
+            free(a->kids);
+            a->kids = kids, a->n = SUB_SLOTS;
+            for (uint32_t k = 0; k < SUB_SLOTS; k++) a->kids[k] = slot, a->kids[k].i = sub[g][k];
+            note(l, " 1/%s[%lld]/ExSkillArray [%lld, %lld, %lld];", gp->map, (long long)id, (long long)sub[g][0],
+                 (long long)sub[g][1], (long long)sub[g][2]);
+        }
+        if (r->i < SUB_SLOTS - 1) {
+            note(l, " 1/%s[%lld]/Rarity %lld->%d;", gp->map, (long long)id, (long long)r->i, SUB_SLOTS - 1);
+            r->i = SUB_SLOTS - 1;
+        }
+    }
+    return 1;
+}
+
+// chunks: "max" or a count 0..CHUNKS_MAX: the player data's HaveSkillChipMap gets that count for every ability a sub
+// slot can hold (the enum's values below SUB_ABILITY_END). Separate from gear_abilities.
+#define CHUNKS_MAX 999
+static int apply_chunks(const Json *J, Plain *p, Log *l) {
+    const Json *c = jget(J, "chunks");
+    if (!c || c->kind == J_NULL) return 1;
+    int64_t n = CHUNKS_MAX;
+    if (c->kind == J_NUM && c->num == (double)(int64_t)c->num) n = (int64_t)c->num;
+    else if (c->kind != J_STR || strcmp(c->str, "max")) return fail("chunks must be \"max\" or a count", 0);
+    if (n < 0 || n > CHUNKS_MAX) return fail("chunks must be 0..999", n);
+    Mp *m = path(p, "1/HaveSkillChipMap");
+    const char *e = ability_enum(), *nm;
+    if (!m || m->kind != M_MAP) return fail("the save has no HaveSkillChipMap where 11.2.0 has it", 0);
+    if (!e) return fail("the ability names were not found in main", 0);
+    size_t len;
+    int64_t v;
+    int changed = 0;
+    while (enum_next(&e, &nm, &len, &v)) {
+        if (v < 0 || v >= SUB_ABILITY_END) continue;
+        Mp *have = mp_get(m, v);
+        if (have && have->kind == M_INT && have->i == n) continue;
+        if (have && have->kind != M_INT) return fail("HaveSkillChipMap holds a record this code does not know", v);
+        Mp count = new_int(n);
+        if (have) have->i = n;
+        else if (!mp_append(m, v, &count)) return fail("out of memory", 0);
+        changed++;
+    }
+    if (changed) note(l, " 1/HaveSkillChipMap %d abilities = %lld;", changed, (long long)n);
+    return 1;
+}
+
 static int apply(const Profile *pr, Plain *p, Log *l) {
     const Json *J = &pr->root;
     int64_t now = (int64_t)(plat_unix_time_ns() / 1000000000u);
@@ -1195,6 +1372,7 @@ static int apply(const Profile *pr, Plain *p, Log *l) {
             set_int(p, l, eq, 0);
         }
     }
+    if (!apply_gear_abilities(J, p, l) || !apply_chunks(J, p, l)) return 0;
     // Win emote.
     int64_t e;
     int has_e = jint(J, "emote", &e);
@@ -1369,7 +1547,7 @@ static int edit_file(const char *dir, int backup, Edit edit, const void *ctx, co
     Plain p;
     int changed = 0, parsed = plain && plain_parse(&p, plain, pn);
     if (!plain) snprintf(fail_why, sizeof fail_why, "%s does not pass its check (another game version?)", file);
-    else if (!parsed) snprintf(fail_why, sizeof fail_why, "%s does not hold the 11.2.0 layout", file);
+    else if (!parsed) snprintf(fail_why, sizeof fail_why, "%s does not hold the supported game version's layout", file);
     if (!parsed) rt_log("save profile: %s; left as it is", fail_why);
     Log l = {.n = 0};
     int applied = parsed && edit(ctx, &p, &l);

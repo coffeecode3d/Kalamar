@@ -88,11 +88,21 @@ impl GameHost for TauriHost {
     fn stop(&self) {
         let _ = self.0.state::<crate::commands::AppState>().game.stop();
     }
+    fn open_game(&self) -> crate::launch::OpenGame {
+        crate::launch::open_game(&self.0.state::<crate::commands::AppState>().game.status())
+    }
+    fn close_open_game(&self) -> Result<(), String> {
+        let game = self.0.state::<crate::commands::AppState>().game.clone();
+        crate::launch::close_open_game(&game, crate::launch::CLOSE_GRACE, crate::launch::CLOSE_FORCE_WAIT).map(|_| ()).map_err(|e| e.to_string())
+    }
     /// The build, never the installation (`engine::build_label`): the runtime commit the game was compiled from, else the
     /// one this launcher carries.
     fn build_id(&self) -> String {
         let (installed, bundled) = runtime_commits(&self.0);
         crate::proto::engine::build_label(installed.or(bundled).as_deref())
+    }
+    fn game_outdated(&self) -> bool {
+        self.root().is_some_and(|r| crate::installer::gamever::is_outdated_root(&r))
     }
     fn engine(&self) -> Option<crate::proto::engine::EngineInfo> {
         let root = self.root()?;
@@ -113,6 +123,14 @@ impl GameHost for TauriHost {
         }
         let p = crate::profile::load_profile(&st.data_dir);
         [("weapon", p.weapon), ("gear.head", p.head), ("gear.clothes", p.clothes), ("gear.shoes", p.shoes)].into_iter().filter_map(|(k, v)| v.map(|v| (k.to_string(), v.to_string()))).collect()
+    }
+    fn current_sub_abilities(&self) -> std::collections::HashMap<String, Vec<Option<String>>> {
+        let st = self.0.state::<crate::commands::AppState>();
+        if !st.config.lock().unwrap_or_else(|p| p.into_inner()).apply_profile {
+            return Default::default();
+        }
+        let p = crate::profile::load_profile(&st.data_dir);
+        crate::profile::GEAR_PARTS.iter().filter_map(|part| p.sub_abilities.part(part).map(|s| (part.to_string(), s.clone()))).collect()
     }
 }
 
@@ -753,7 +771,8 @@ pub async fn proto_game_check(app: AppHandle, hub: State<'_, Hub>) -> R<Value> {
     let root = game_root(&app);
     let has_exe = root.as_ref().is_some_and(|r| crate::install::exe_path(r).is_file());
     let (installed, bundled) = runtime_commits(&app);
-    Ok(json!(crate::proto::freshness::assess(info.as_ref(), has_exe, installed.as_deref(), bundled.as_deref())))
+    let old = root.as_deref().filter(|r| crate::installer::gamever::is_outdated_root(r)).and_then(crate::installer::gamever::folder_version);
+    Ok(json!(crate::proto::freshness::assess(info.as_ref(), has_exe, installed.as_deref(), bundled.as_deref(), old.as_deref())))
 }
 
 fn game_root(app: &AppHandle) -> Option<std::path::PathBuf> {

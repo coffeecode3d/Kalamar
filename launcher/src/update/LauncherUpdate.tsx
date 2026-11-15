@@ -1,45 +1,22 @@
-// The launcher's own update, in the simple mode's words: one quiet line on the Play page ("Update available: 0.2.0",
-// Update / Later, the release notes as plain text, the download's progress, "Restart to finish"), and its block in
-// Settings > About. A build without an update repository shows none of it (`enabled` is false). Nothing is installed
-// without a click. The notes come from the signed manifest and are set as text: no HTML, no Markdown, no link.
-import { useEffect, useState, type ReactNode } from "react";
+// The launcher's own update, in the simple mode's words: its block in Settings > About (the state, "Check for updates",
+// and the same line the bar shows everywhere: Update, the download's progress, "Restart to finish"). The bar at the top
+// of every page and the start dialog are in UpdateBar.tsx; both use the actions and the texts defined here. A build
+// without an update repository shows none of it (`enabled` is false). Nothing is installed without a click. The notes
+// come from the signed manifest and are set as text: no HTML, no Markdown, no link.
+import type { ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { onUpdateState, updateApi, type UpdateView } from "../api";
+import { updateApi, type UpdateView } from "../api";
 import { useApp } from "../ctx";
 import { formatDateTime, useI18n, type Key } from "../i18n";
-import { IconAlert, IconCheck, IconRefresh } from "../icons";
+import { IconAlert, IconRefresh } from "../icons";
+import { restartBlock } from "./prompt";
+import { setUpdateView, useLauncherUpdate } from "./store";
 
-// ---- one view for the whole page: the backend's events keep it fresh -----------------------------------------------
-let latest: UpdateView | null = null;
-const subscribers = new Set<(v: UpdateView) => void>();
-let listening = false;
+export { setUpdateView, useLauncherUpdate };
 
-export function setUpdateView(v: UpdateView) {
-  latest = v;
-  for (const s of subscribers) s(v);
-}
+export const mb = (bytes: number) => (bytes / 1048576).toFixed(bytes >= 10485760 ? 0 : 1);
 
-function listenOnce() {
-  if (listening) return;
-  listening = true;
-  void onUpdateState(setUpdateView).catch(() => {});
-  if (!latest) void updateApi.status().then(setUpdateView).catch(() => {});
-}
-
-export function useLauncherUpdate(): UpdateView | null {
-  const [v, setV] = useState<UpdateView | null>(latest);
-  useEffect(() => {
-    listenOnce();
-    subscribers.add(setV);
-    if (latest) setV(latest);
-    return () => { subscribers.delete(setV); };
-  }, []);
-  return v;
-}
-
-const mb = (bytes: number) => (bytes / 1048576).toFixed(bytes >= 10485760 ? 0 : 1);
-
-function errorKey(code: string): Key {
+export function errorKey(code: string): Key {
   const known = ["network", "integrity", "untrusted", "disk", "locked", "not_writable", "spawn", "other_instance", "installer", "rollback_failed", "rate_limited", "blocked_game", "blocked_install", "blocked_relay"];
   return (known.includes(code) ? `lup.err.${code}` : "lup.err.generic") as Key;
 }
@@ -55,30 +32,16 @@ function Notes({ text }: { text: string }) {
   );
 }
 
-/** The line of the Play page (`inAbout`: the same in Settings > About, where "Later" does not hide it). */
+/** The update's line in Settings > About (`inAbout`: no "Later" there; it was the Play page's line before the bar). */
 export function LauncherUpdateLine({ inAbout = false }: { inAbout?: boolean }) {
   const v = useLauncherUpdate();
   const { t } = useI18n();
   const { fail, game, game2, installing } = useApp();
   if (!v || !v.enabled) return null;
   const act = (p: Promise<UpdateView>) => void p.then(setUpdateView).catch(fail);
-  // The game and the installation are followed live by the page; the relay only by the backend's last answer (which
-  // checks all three again when "Restart" is pressed).
-  const live = game.state === "running" || game.restarted || game2.state === "running";
-  const waitFor = live ? "game" : installing !== null ? "install" : v.blocked === "relay" ? "relay" : null;
+  const waitFor = restartBlock(v, { game: game.state === "running" || game.restarted || game2.state === "running", install: installing !== null, match: false });
   const ok = () => act(updateApi.dismiss());
 
-  if (v.notice && !inAbout) {
-    const n = v.notice;
-    const bad = n.kind !== "updated";
-    return (
-      <div className={`upd-line lup-line ${bad ? "lup-warn" : "lup-done"}`} role="status">
-        {bad ? <IconAlert className="upd-ico" /> : <IconCheck className="upd-ico" />}
-        <p className="grow upd-title">{t(`lup.notice.${n.kind}` as Key, { from: n.from, to: n.to })}</p>
-        <button className="btn btn-small btn-ghost" onClick={ok}>{t("lup.ok")}</button>
-      </div>
-    );
-  }
   const a = v.available;
   if (!a) return null;
   if (!inAbout && v.later && v.phase === "idle") return null;

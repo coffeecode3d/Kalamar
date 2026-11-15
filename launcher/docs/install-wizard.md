@@ -18,11 +18,11 @@ the launcher (`installer/portable.rs`, `installer/prebuilt.rs`):
 | exefs | `s3_extract.py` on the update, then **SHA-256 of `main` against `recomp/targets.py`** (wrong update: stops here, before any long step, and deletes the extraction) | `exefs\main` present (hash still checked) |
 | hactool | copies the hactool shipped with the launcher (built by the engine's `tools/build_hactool.py`, with `range.patch`) to `tools\bin` with its license texts | the shipped exe in place, or RomFS merged |
 | romfs | `s3_merge.py --in-place`: hactool reads the two Program NCAs inside the NSP files (no 12 GB copy); runs **beside the lift and the compile** (the lift reads only the ExeFS; the compile compiles every object beside it and waits for it only before the RomFS index and the link); progress = bytes of its temporary folder | `romfs.bin` + `index.json` |
-| lift | `recomp/gen.py --target splatoon3-v1120 --jobs N` into the existing `lift\` (N: every logical CPU within 80 % of the available memory at 0.75 GB per worker; the generator's own default assumes 1.5 GB) (it rewrites only the chunks whose text changes; progress from `emitted n/m chunks`); the game of this install may run meanwhile (below normal priority then) | complete and made by the same generator (digest of `recomp/` + `tools/check_content.py`), or the game built from this source |
+| lift | `recomp/gen.py --target splatoon3-v1130 --jobs N` into the existing `lift\` (N: every logical CPU within 80 % of the available memory at 0.75 GB per worker; the generator's own default assumes 1.5 GB) (it rewrites only the chunks whose text changes; progress from `emitted n/m chunks`); the game of this install may run meanwhile (below normal priority then) | complete and made by the same generator (digest of `recomp/` + `tools/check_content.py`), or the game built from this source |
 | compile | waits for the toolchain; while the RomFS merge still runs, and for an update (a game executable in place), `--compile-only` first (every object; a placeholder RomFS index during the merge), then waits for the merge and for the game of this install to be closed; `tools/build_game.py … --jobs N --toolchain tools\llvm --deps tools\deps --ninja tools\bin\ninja.exe` (Ninja: only what is out of date; progress from `[n/N]`); below normal priority when the jobs outnumber the cores or the game is open; a link run stopped by a game started during it waits for that game and runs again; keeps `lift\` and `build\obj\` unless asked | game built from the same inputs (digest of every source file that can reach the executable, the target, the RomFS index, the toolchain) |
 | xlate | copies the translator shipped with the launcher, built from the very sources of the bundled runtime (`kalamar-tools.json` names their digest; a test checks it); only without one, a local build (Git, .NET 10 SDK, Visual Studio C++ tools, when present) | translator built from this source |
 | keys | `s3save.py keys` | file present, same `s3save.py` |
-| layout | `userdata\logs`, `userdata\profile`; points the launcher at `<install>\work\splatoon3-11.2.0` | never |
+| layout | `userdata\logs`, `userdata\profile`; points the launcher at `<install>\work\splatoon3-11.3.0` (after the self-test, for an install made for the previous game version) | never |
 | selftest | `splat3.exe --selftest`, `--probe-profile` (exit 0, no `FAILED`/`FATAL`) | never |
 | cleanup | removes whatever intermediate is left | never |
 
@@ -49,7 +49,7 @@ the launcher (`installer/portable.rs`, `installer/prebuilt.rs`):
   "Try again" resumes at that step.
 - **The player's files** are only read (by `s3_extract.py`, `s3_merge.py`, hactool; hactool reads the two Program NCAs
   in place inside the NSP files). `s3_merge.py` keeps, for about two minutes, a key file derived from prod.keys in
-  `work\splatoon3-11.2.0\update-merge-*` (with the NCA copies too when hactool cannot read in place); the wizard
+  `work\splatoon3-11.3.0\update-merge-*` (with the NCA copies too when hactool cannot read in place); the wizard
   deletes that folder whenever the step ends, canceled or failed.
   Key values are never kept, logged or shown: the check reads prod.keys once (values included, in memory, then
   dropped) and only looks at the key names.
@@ -128,7 +128,7 @@ community page says a running update plainly, and a match refused because this g
 the update.
 
 **Installs made by pre-release tools** (a folder that holds its own copy of the runtime source next to
-`work\splatoon3-11.2.0`) are found at start (their default folder, the configured root, the folders the launcher runs
+`work\splatoon3-11.3.0`) are found at start (their default folder, the configured root, the folders the launcher runs
 from) and offered as "Update the installed game" (or "Play the installed version"). The update needs no dumps or keys:
 the extracted ExeFS (its `main` hash is checked again) and the merged RomFS are reused, as are the tools, the Python
 environment and hactool. The runtime source is replaced by the bundled one; the generated C is reused when the code
@@ -142,6 +142,60 @@ nothing to relink). If the update then fails it is put back; after success it st
 version" (Installation page; again to go forward; the next update then only relinks).
 The translator is kept the same way (`work\xlate\previous`). User data (`userdata\`: saves, profile, shader and pipeline
 caches) and the settings file are never touched; the old launcher is left in place, and its data (`<install>\launcher-data`) is copied once into Kalamar's data folder when Kalamar has no profile yet.
+
+## One game version, and the update to the next
+
+The launcher builds ONE version of the game: 11.3.0. Everything that names it reads `src-tauri/src/installer/gamever.rs`
+(`CURRENT`: the display version, the game folder `splatoon3-11.3.0`, the engine target `splatoon3-v1130`, the update's
+content-meta version and Program NCA name, the merged RomFS's size; the engine's `recomp/targets.py` holds the
+matching `main` hash the extraction step checks). The next game update is a change to that file, the version text of
+the four interface languages (a test fails on any `11.x.y` there that is neither `CURRENT` nor `PREVIOUS`), the
+engine's own target, and a re-bundle. `PREVIOUS` (11.2.0) exists only to recognize what a player still has; nothing
+builds it.
+
+**The update file.** The wizard asks for the 11.3.0 update. Any other file is named for what it is, before anything
+is installed (`installer/nsp.rs`): the 11.2.0 update (the version Kalamar used before) gets "This is the 11.2.0 update,
+the version Kalamar used before. Kalamar now needs the 11.3.0 update."; another version of the update gets its revision
+and the version needed; a file without a content-meta is accepted, and its `main` is checked against the engine's hash
+before any long step (`e.version_mismatch`).
+
+**An install made for 11.2.0** (the game in `<install>\work\splatoon3-11.2.0`) is not rebuilt in place: the
+game of another version needs another ExeFS, RomFS, generated C and executable.
+
+- *Recognized.* `find_existing` and `update_check` see the old folder and no 11.3.0 game. The Play page shows "Game
+  update needed: Splatoon 3 11.3.0" (it is the "game update" notice of the update check, with `game_from`; no new
+  concept) with what the update asks, keeps and deletes, and the wizard's welcome screen has a card for it.
+- *Offline play stays possible.* The launcher goes on pointing at the old game until the update is done, and it still
+  starts for solo play (nothing about starting a game depends on its version). Online play does not: the check that
+  blocks a game too old for the automatic match (`proto/freshness.rs`, level `too_old`) also fires for a game folder of
+  another version (`GameCheck.old_version`), so the community pages refuse "ready", "start" and "accept" with the
+  update's words, the runner refuses a match (`GameHost::game_outdated`), and `PUT /v1/me/game` is not sent: the
+  server never learns of a build whose label would say 11.3.0 for an 11.2.0 game.
+- *What is asked.* Only the 11.3.0 update file is new: the base game and the keys file are the paths remembered in
+  the launcher's configuration (`install.base_nsp`, `install.prod_keys`; checked again, asked again only when the file is
+  gone or fails its check), and the remembered update path, which is the old file, is cleared.
+- *What is built.* `<install>\work\splatoon3-11.3.0` beside the old folder (about 13 GB more, checked before every step), with the
+  tools, Python and shader translator the install already has (the translator and hactool do not depend on the game
+  version; the state file's `target` field says which game version its steps were done for: a state of another one
+  forgets the exefs, romfs, lift, compile and keys steps and their input digests, and keeps the tools). The save keys
+  (`s3save.py keys`) are made again from the 11.3.0 `main` and RomFS, as the install log says; generated C and objects
+  of the old game are not reused (a different `main`).
+- *What is kept.* At the layout step, everything under the old game's `userdata*` folders (saves, profile, logs,
+  the second player's `userdata-p2`) is copied into the new game folder, never overwriting a file already there and
+  never following a link (a junction or symbolic link inside is left alone and counted in the log). The shader and
+  pipeline caches (`gamever::DERIVED_CACHES`) are not carried: they come from the code the game runs, so the new game
+  builds its own as it is played (the first sessions translate shaders again). The
+  settings file (`build\kalamar.ini`) comes along when the launcher's root switches (`on_root`), as for any new folder,
+  and the Locker's profile is the launcher's own (`<data>\profile.json`). The save is not rewritten: the game version
+  word in its header is only shown by `s3save.py`, never read or written by anything else.
+- *When the old folder goes.* In the cleanup step, which runs only after the self-check and the profile probe of the
+  new game passed: the launcher is pointed at the new folder, then `gamever::remove_previous_game` deletes the old
+  one (about 14 GB). It refuses unless the folder is a real folder inside the install folder; a link or junction found
+  inside is removed itself and never followed; a file in use leaves the rest in place with a warning ("The old game
+  folder could not be deleted completely...") and the next update tries again. A failed or cancelled install deletes
+  nothing and leaves the launcher on the old game; "Resume" continues the update. "Uninstall" on an install not yet
+  updated removes what the wizard made in the old game folder too, and keeps its saves and settings like the current
+  one's.
 
 ## Bundled source and tools
 

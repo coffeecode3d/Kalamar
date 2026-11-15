@@ -10,3 +10,4 @@ pub mod sarc;
 pub mod catalogue;
 pub mod icons;
 pub mod service;
+pub mod subs;

@@ -19,6 +19,11 @@ stray `KLM_LAN` in the shell cannot turn an offline launch into a network one. A
 `--profile <root>\userdata\profile`; the user data folder is `<root>\userdata`, so a custom root never touches another
 folder's save.
 
+A game folder named for another game version than the one the launcher builds (`work\splatoon3-11.2.0` while it builds
+11.3.0: `installer::gamever::is_outdated_root`) still starts, for solo play: nothing in a launch depends on the version.
+It is not offered for online play (the community pages ask for the game update, the match runner refuses a match, the
+server is not told of the game: [install-wizard.md](install-wizard.md), "One game version, and the update to the next").
+
 ## Start modes
 
 A start mode opens the game directly in a scene through `KLM_START`, which wins over the `start_scene=` setting
@@ -79,6 +84,11 @@ and has the keyboard focus, so Enter is enough. With a server the big button is 
 opens the Community page) and takes the focus instead; the offline modes (Full game, Training, Free roam) are the
 buttons of the solo block under it. While the game runs the button becomes **Back to the game** (brings the game
 window to the front) next to **Stop**.
+A game started here for solo play does not block a community match: when a match must start, the launcher closes that
+game first (a close request to its window, then, after 6 seconds, termination of that process only) and starts the
+match with its own environment, within the server's launch deadline
+([community-client.md](community-client.md)). Searching, a found match and an open room say so beforehand. A match
+in progress is never closed this way. A private match started from a code still refuses to start while a game runs.
 Settings > Launcher > "Minimize the launcher while the game runs" (off by default) minimizes the launcher when the game starts
 and brings it back when the game ends (the taskbar, not the notification area: the launcher's icon there only stands for
 a game update that runs when the launcher closes, and carries the end-of-install notification).

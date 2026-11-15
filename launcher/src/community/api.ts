@@ -52,7 +52,7 @@ export type Discovered =
 export interface SessionInfo { logged_in: boolean; provider: string | null; user_id: string | null; display_name: string | null }
 export interface StreamInfo { state: "connecting" | "open" | "retrying" | "stopped"; resumed: boolean; retry_in_s: number | null; reason: string | null; last_seq: number }
 export interface RunnerStatus {
-  match_id: string; phase: "checking" | "confirm" | "resolving" | "choosing" | "launching" | "continuing" | "running" | "uploading" | "done" | "waiting" | "refused" | "failed" | "closed" | "late";
+  match_id: string; phase: "checking" | "confirm" | "resolving" | "choosing" | "closing" | "launching" | "continuing" | "running" | "uploading" | "done" | "waiting" | "refused" | "failed" | "closed" | "late";
   game_state: string | null; game: GameProgress | null; code: string | null; reason: string | null; relay_ip: string | null; role: string | null; member_name: string | null;
   env: [string, string][]; status_path: string | null; result_path: string | null; result_uploaded: boolean;
   /** `choosing`: slot -> constraint; the imposed loadout (slot -> id); the result's `loadout.ok`. */

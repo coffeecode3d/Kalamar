@@ -11,7 +11,9 @@ const WEAPONS = [W("Lanceur", "Blaster", "Lanzador", "ブラスター"), W("Roul
 const ADJ = [W("Rapide", "Swift", "Rápido", "すばやい"), W("Calme", "Calm", "Tranquilo", "おだやかな"), W("Joyeux", "Cheerful", "Alegre", "陽気な"), W("Rusé", "Sly", "Astuto", "ずる賢い"), W("Fidèle", "Loyal", "Leal", "忠実な"), W("Lumineux", "Bright", "Brillante", "まぶしい"), W("Têtu", "Stubborn", "Terco", "頑固な"), W("Discret", "Quiet", "Discreto", "ひかえめな")];
 const SUBJ = [W("Pilote", "Pilot", "Piloto", "パイロット"), W("Peintre", "Painter", "Pintor", "ペインター"), W("Rêveur", "Dreamer", "Soñador", "夢見る人"), W("Gardien", "Keeper", "Guardián", "番人"), W("Voyageur", "Traveller", "Viajero", "旅人"), W("Artiste", "Artist", "Artista", "アーティスト"), W("Capitaine", "Captain", "Capitán", "キャプテン"), W("Rival", "Rival", "Rival", "ライバル")];
 const BRANDS = ["Nordo", "Kappa Line", "Velo", "Orbe", "Tamis", "Zenith"];
-const ABILITIES = [W("Vitesse", "Speed", "Velocidad", "スピード"), W("Défense", "Defence", "Defensa", "防御"), W("Économie", "Saver", "Ahorro", "節約"), W("Saut", "Jump", "Salto", "ジャンプ"), W("Recharge", "Recharge", "Recarga", "回復")];
+const ABILITIES = [W("Vitesse", "Speed", "Velocidad", "スピード"), W("Défense", "Defence", "Defensa", "防御"), W("Économie", "Saver", "Ahorro", "節約"), W("Saut", "Jump", "Salto", "ジャンプ"), W("Recharge", "Recharge", "Recarga", "回復"), W("Ouverture", "Opener", "Apertura", "開幕"), W("Revanche", "Comeback", "Remontada", "逆転")];
+/** The made-up abilities a sub slot can hold: the first five (the last two are main-only, as in the real game some are). */
+export const MOCK_SUB_ABILITIES = ["a0", "a1", "a2", "a3", "a4"];
 const KINDS = [W("Tir", "Shooter", "Tirador", "シューター"), W("Rouleau", "Roller", "Rodillo", "ローラー"), W("Précision", "Charger", "Precisión", "チャージャー"), W("Seau", "Slosher", "Cubo", "スロッシャー")];
 const SUBS = [W("Bombe", "Bomb", "Bomba", "ボム"), W("Balise", "Beacon", "Baliza", "ビーコン"), W("Mur", "Wall", "Muro", "ウォール"), W("Mine", "Mine", "Mina", "トラップ")];
 const SPECIALS = [W("Tornade", "Tornado", "Tornado", "トルネード"), W("Bouclier", "Shield", "Escudo", "シールド"), W("Vague", "Wave", "Ola", "ウェーブ"), W("Fusée", "Rocket", "Cohete", "ロケット")];
@@ -89,7 +91,7 @@ export const STAGE_IDS = STAGE_NAMES.map(([s]) => s);
 /** `gamedata_stages`: the made-up stages, or (`none`) what the launcher gets without game data. */
 export function stagesView(none: boolean): StagesView {
   return none
-    ? { stages: [], origin: "neutral", reason: "no romfs.bin and index.json found under D:\\Games\\Kalamar\\work\\splatoon3-11.2.0", sizes: [480, 160] }
+    ? { stages: [], origin: "neutral", reason: "no romfs.bin and index.json found under D:\\Games\\Kalamar\\work\\splatoon3-11.3.0", sizes: [480, 160] }
     : { stages: STAGES, origin: "game", reason: null, sizes: [480, 160] };
 }
 

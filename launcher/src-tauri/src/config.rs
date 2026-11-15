@@ -96,6 +96,8 @@ pub struct LauncherConfig {
     pub skip_first_launch: bool,
     /// `unlock_all`: own every weapon, gear, banner, title word and emote.
     pub unlock_all: bool,
+    /// `unlock_chunks`: a full stock of ability chunks (`chunks: "max"`). Off by default.
+    pub unlock_chunks: bool,
     /// Path of `splat3-relay.exe` (none = looked for in a `relay\target\release` folder above the game root).
     pub relay_exe: Option<String>,
     pub relay_port: u16,
@@ -125,6 +127,7 @@ impl Default for LauncherConfig {
             apply_profile: true,
             skip_first_launch: true,
             unlock_all: true,
+            unlock_chunks: false,
             relay_exe: None,
             relay_port: lan::DEFAULT_RELAY_PORT,
             second_name: "Player2".into(),
@@ -202,8 +205,9 @@ pub fn ancestors_in_profile(start: &Path, profile: Option<&Path>) -> Vec<PathBuf
     start.ancestors().take_while(|d| under(d, home)).map(Path::to_path_buf).collect()
 }
 
-/// First guess of the game folder: `KALAMAR_GAME_ROOT`, else a `work\splatoon3-11.2.0` folder found by walking up
-/// from the launcher executable and the current directory, inside the user's profile only.
+/// First guess of the game folder: `KALAMAR_GAME_ROOT`, else a `work\splatoon3-<version>` folder found by walking up
+/// from the launcher executable and the current directory, inside the user's profile only: the current version's, else
+/// the previous one's (an install not yet updated: still playable offline, and the page asks for the game update).
 pub fn default_root() -> Option<PathBuf> {
     if let Some(v) = game_root_env() {
         return Some(v);
@@ -212,9 +216,11 @@ pub fn default_root() -> Option<PathBuf> {
     let profile = user_profile();
     for start in starts.into_iter().flatten() {
         for dir in ancestors_in_profile(&start, profile.as_deref()) {
-            let cand = dir.join("work").join("splatoon3-11.2.0");
-            if cand.is_dir() {
-                return Some(cand);
+            for name in [crate::installer::gamever::CURRENT.game_dir, crate::installer::gamever::PREVIOUS.game_dir] {
+                let cand = dir.join("work").join(name);
+                if cand.is_dir() {
+                    return Some(cand);
+                }
             }
         }
     }

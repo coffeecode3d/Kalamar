@@ -72,6 +72,20 @@ SPLATOON3 = {
         },
         patches='recomp/patches-splatoon3-v1120.txt', family='splatoon3', sdk_20_5=True, movie=False,
         boot_nvn=0x4529180, init_arrays={'main': 6775, 'sdk': 83}, exe='splat3'),
+    # Splatoon 3 11.3.0: the same sdk and rtld files; main was rebuilt (build id 28c4287a..., one more init_array
+    # entry, 2416 more bytes of code). The first nvnBootstrapLoader call is 11.2.0's carried by tools/port_offsets.py
+    # (the bl at main+0x4529aec); the runtime's other main offsets for this build are its row of
+    # runtime/splat3_addr.c.
+    'splatoon3-v1130': Target(
+        name='splatoon3-v1130', game='Splatoon 3', title_id='0100C2500FC20000', display_version='11.3.0',
+        modules=('main', 'sdk'),
+        exefs_sha256={
+            'main': '942420a731d52141f97d70baacf7c61ac871de5cebfed44efc39cc70dfcbfd52',
+            'sdk': '1d187f29784cd0af46e9e123fc2a62c77b3b07c5a39c8633d90d6c80de64e4ad',
+            'rtld': '49308064fddb52dfe9140c11a32cc6333a0917546c871967d013dcb076402817',
+        },
+        patches='recomp/patches-splatoon3-v1130.txt', family='splatoon3', sdk_20_5=True, movie=False,
+        boot_nvn=0x4529af0, init_arrays={'main': 6776, 'sdk': 83}, exe='splat3'),
 }
 
 

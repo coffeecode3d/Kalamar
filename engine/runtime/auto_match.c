@@ -1,4 +1,4 @@
-// Splatoon 3 11.2.0: automatic LAN match entry and the match result, for a launcher that is the menu and starts the
+// Splatoon 3: automatic LAN match entry and the match result, for a launcher that is the menu and starts the
 // game only for one match (docs/auto-match.md).
 //
 // SPLAT3_MATCH=host|join, with LAN play on (SPLAT3_LAN) and SPLAT3_START=lobby-lan: after boot the runtime enters the
@@ -44,6 +44,7 @@
 #include "platform/platform.h"
 #include "save_profile.h"
 #include "scene_start.h"
+#include "splat3_addr.h"
 #include "utf16.h"
 #include "vk.h"
 
@@ -51,7 +52,9 @@ void gfx_window_request_close(void);   // gfx_window_win.c / gfx_window_sdl.c: a
 
 volatile int automatch_on;
 
-#define SCENE_STATES 0x60f24e0ull   // main: the scene states' holder (scene_start.c)
+// The main offsets cited in this file's comments are 11.2.0's; the running build's are a row of splat3_addr.c.
+static const Splat3Addr *s3;        // set by automatch_init before any hook is on
+#define SCENE_STATES (s3->scene_states)   // main: the scene states' holder (scene_start.c)
 #define LOBBY_LOCAL_STATE 0x6678ull // the local lobby's state in a states object
 #define REC_OFF 0x40                // LastVersusRecord in the local lobby's state
 #define REC_SIZE 0x7904             // up to MyPersonalIndex
@@ -488,8 +491,8 @@ static int wait_above(volatile int32_t *c, int32_t v, uint64_t end) {
 // main; the job stores it with its name string, "session::BrowseSessionJob::CompleteProcess"). A press on the list
 // before its search ended is lost (measured: Y 2 s after the list opened did nothing). Hooked through the
 // function-entry hook (FNPROF_AUTO) only from the lobby to the stage, so the rest of the game runs without it.
-#define PIA_BROWSE_DONE 0x974f10ull   // BrowseSessionJob::CompleteProcess
-#define NET_BROWSE 0x44ea9f0ull       // the game's network system, vtable +0x70: browse (-> the session library's BrowseSessionAsync)
+#define PIA_BROWSE_DONE (s3->pia_browse_done)   // BrowseSessionJob::CompleteProcess
+#define NET_BROWSE (s3->net_browse)   // the game's network system, vtable +0x70: browse (-> the session library's BrowseSessionAsync)
 static volatile int32_t n_browse_req, n_browse_done;
 
 // ---- the room's settings. Measured with function-entry traces and memory reads of the host's room screen (docs):
@@ -507,23 +510,23 @@ static volatile int32_t n_browse_req, n_browse_done;
 // The host writes the wanted values at the entry of the commit, every time it runs: the game itself then sets the room
 // and sends the settings, as when the player picks them. Its own screen keeps showing its cursor's choices (the window
 // is hidden). The members' copies (the net states' serialize and deserialize, below) are read back to check.
-#define SAVE_HOLDER 0x6097e78ull     // main: the save data object's pointer
+#define SAVE_HOLDER (s3->save_holder)   // main: the save data object's pointer
 #define SAVE_PRIVATE 0xb8ull         // save data object: -> the private battle's settings
 #define SAVE_RULE 0x219070ull        // save data object: -> {+4 rule}
-#define ROOM_COMMIT 0x38f9930ull     // the room screen's commit (x0 the screen)
-#define ROOM_SCREEN 0x38f7ff0ull     // the room screen's update, every frame it is up, host and guests (it calls the commit)
+#define ROOM_COMMIT (s3->room_commit)   // the room screen's commit (x0 the screen)
+#define ROOM_SCREEN (s3->room_screen)   // the room screen's update, every frame it is up, host and guests (it calls the commit)
 #define UI_RECON 0xcefull            // room screen: Recon on (u8)
 #define UI_RULE 0xcf0ull             // room screen: rule (u32)
 #define PRIV_STAGE 0x0ull
 #define PRIV_POOL_N 0x8ull
 #define PRIV_POOL 0x10ull
 #define PRIV_OPTS 0x454ull
-#define NET_VERSUS_OUT 0x3d7c6f8ull  // VersusPrivateSettingNetState serialize (host) / deserialize (members), x0 the state
-#define NET_VERSUS_IN 0x3d7c844ull
-#define NET_COMMON_OUT 0x3d7cda4ull  // CommonPrivateSettingNetState serialize / deserialize
-#define NET_COMMON_IN 0x3d7ced4ull
-#define NET_COMMON_IN_B 0x3d7cf68ull // the same through its second base: x0 = the state + 0x10 (what a member runs)
-#define RULE_NAMES 0x4f30499ull      // main: the VersusRule enum's text ("<name> , <name> , ...")
+#define NET_VERSUS_OUT (s3->net_versus_out)  // VersusPrivateSettingNetState serialize (host) / deserialize (members), x0 the state
+#define NET_VERSUS_IN (s3->net_versus_in)
+#define NET_COMMON_OUT (s3->net_common_out)  // CommonPrivateSettingNetState serialize / deserialize
+#define NET_COMMON_IN (s3->net_common_in)
+#define NET_COMMON_IN_B (s3->net_common_in_b) // the same through its second base: x0 = the state + 0x10 (what a member runs)
+// main: the VersusRule enum's text ("<name> , <name> , ..."): splat3_addr.c rule_names
 static char rules_error[200];   // parse_rules: why the rules cannot work
 static void parse_rules(const char *v);
 static int stage_scene(int id, char *out, size_t cap);
@@ -559,7 +562,7 @@ static int stage_list(int32_t *ids, int cap);
 static volatile uint64_t net_versus, net_common;   // the room's net states, as their (de)serialize saw them
 
 static uint64_t save_part(uint64_t off) {
-    uint64_t s = rd64(main_base + SAVE_HOLDER);
+    uint64_t s = s3 ? rd64(main_base + SAVE_HOLDER) : 0;
     return s ? rd64(s + off) : 0;
 }
 
@@ -590,6 +593,7 @@ static void room_commit(void) {
 }
 
 void automatch_fn_hit(uint64_t addr) {
+    if (!s3) return;
     uint64_t o = addr - main_base;
     if (o == PIA_BROWSE_DONE) BUMP(n_browse_done);
     else if (o == NET_BROWSE) BUMP(n_browse_req);
@@ -659,8 +663,10 @@ const char *automatch_option_key(int i) { return i >= 0 && i < OPTS ? opt_keys[i
 int automatch_rule_names(uint64_t base, char (*names)[8], int cap) {
     char buf[80];
     int n = 0, k = 0;
-    for (; n < 79 && mem_guest_readable(base + RULE_NAMES + n, 1) && ((const char *)(uintptr_t)(base + RULE_NAMES))[n]; n++)
-        buf[n] = ((const char *)(uintptr_t)(base + RULE_NAMES))[n];
+    const Splat3Addr *sa = splat3_addr();
+    if (!sa) return 0;
+    const char *text = (const char *)(uintptr_t)(base + sa->rule_names);
+    for (; n < 79 && mem_guest_readable(base + sa->rule_names + n, 1) && text[n]; n++) buf[n] = text[n];
     buf[n] = 0;
     for (char *p = buf; *p && k < cap;) {
         p += strspn(p, " ,");
@@ -1547,7 +1553,7 @@ static uint64_t base_utc;   // the record's DateTimeUtc before the match (the lo
 // Measured: the match writes LastVersusRecord there when its results start (the scan of holder slots +0xc0..+0xf8 in
 // the first runs found it at +0xd8 only, on both players).
 static uint64_t lobby_state(void) {
-    uint64_t g = rd64(main_base + SCENE_STATES);
+    uint64_t g = s3 ? rd64(main_base + SCENE_STATES) : 0;
     uint64_t x = g ? rd64(g + 0xd8) : 0;
     uint64_t s = x ? rd64(x + LOBBY_LOCAL_STATE) : 0;
     return s && readable(s, REC_OFF + REC_SIZE) ? s : 0;
@@ -1688,11 +1694,21 @@ static void write_result(uint64_t s, const char *outcome, const char *reason) {
             // profiles' weapon (two players, three matches) and gear (one player)
             fprintf(f, "%s\n    {\"name\": \"%s\", \"self\": %s, \"team\": \"%s\", \"paint\": %u, \"kills\": %u, "
                        "\"assists\": %u, \"deaths\": %u, \"specials\": %u, \"disconnected\": %s, \"weapon\": %d, "
-                       "\"gear\": [%d, %d, %d]}",
+                       "\"gear\": [%d, %d, %d], \"abilities\": [",
                     i ? "," : "", name, i == me && !spectator ? "true" : "false", JE(team_name(rd32(p + 0x150))), rd32(p + 0xad4),
                     rd32(p + 0xac8), rd32(p + 0xacc), rd32(p + 0xad0), rd32(p + 0xad8),
                     rd32(p + 0xadc) & 0xff ? "true" : "false", (int32_t)rd32(p + 0x240), (int32_t)rd32(p + 0x2c8),
                     (int32_t)rd32(p + 0x4d0), (int32_t)rd32(p + 0x6d8));
+            // Each gear's abilities, [main, sub, sub, sub] for head, clothes, shoes: the gear record's +0x14 and
+            // +0xa0/+0x118/+0x190 hold the ability's position in main's ability enum (0: none), written here as the
+            // enum's values, the save's (-1: an empty slot). Measured on two players' gear in three matches, against the
+            // sub abilities their saves held; all sub slots read empty with the room's main_abilities_only.
+            static const uint32_t gear_off[] = {0x2c8, 0x4d0, 0x6d8}, abil_off[] = {0x14, 0xa0, 0x118, 0x190};
+            for (int g = 0; g < 3; g++)
+                for (int k = 0; k < 4; k++)
+                    fprintf(f, "%s%lld%s", k ? ", " : g ? ", [" : "[",
+                            (long long)save_profile_ability_at((int32_t)rd32(p + gear_off[g] + abil_off[k])), k == 3 ? "]" : "");
+            fprintf(f, "]}");
             if (lo_on && i == me && !spectator) {
                 int32_t got[4] = {(int32_t)rd32(p + 0x240), (int32_t)rd32(p + 0x2c8), (int32_t)rd32(p + 0x4d0),
                                   (int32_t)rd32(p + 0x6d8)};
@@ -2588,6 +2604,8 @@ void automatch_init(void) {
     if (v && *v && strcmp(v, "all") && strcmp(v, "save")) { bad_settings("SPLAT3_MATCH_STAGES=%s unknown (all, save)", v); return; }
     v = cfg_get("SPLAT3_MATCH_LOADOUT");
     if (v && *v && !plat_file_exists(v)) { bad_settings("SPLAT3_MATCH_LOADOUT: %s is not a file", v); return; }
+    s3 = splat3_addr();
+    if (!s3) { bad_settings("SPLAT3_MATCH: no main offsets for target %s", rt_target.name); return; }
     main_base = ldr_module(0)->base;
     copy_setting(shots_dir, sizeof shots_dir, "SPLAT3_MATCH_SHOTS");
     copy_setting(host_name, sizeof host_name, "SPLAT3_MATCH_HOST");

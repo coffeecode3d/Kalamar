@@ -66,8 +66,6 @@ pub struct CheckState {
     pub not_before: u64,
     /// Per API URL: the ETag and the releases of that answer.
     pub etags: BTreeMap<String, (String, Vec<Candidate>)>,
-    /// "Later" on the Play page: the version put off, and until when.
-    pub later: Option<(String, u64)>,
     /// The last check's outcome code (`up_to_date`, `available`, `network`, `rate_limited`, `untrusted`).
     pub last_result: String,
 }

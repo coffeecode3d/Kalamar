@@ -616,6 +616,8 @@ export const community = {
   "inc.launcher.spectate": "spectator seats (the launcher needs an update)",
   "m.runner.late": "The match had already started: your game was not started (the game no longer lets a spectator in).",
   "m.runner.confirm": "The launcher waits for your go-ahead to start the game",
+  "m.runner.closing": "Closing the game you had open…",
+  "m.open_game": "The game you have open will be closed when the match starts. Anything you have not saved in it is lost.",
   "m.ask.title": "Start the game for this match?",
   "m.ask.not_joined": "This server wants to start your game for a match you did not join from this launcher (or the launcher restarted since).",
   "m.ask.too_many": "This server has started your game many times in a short while. Start it once more?",
@@ -644,6 +646,9 @@ export const community = {
   "err.erase_name": "The name typed is not your display name.",
   "err.export_write": "The file could not be written ({message}).",
   "err.bad_answer": "The server's answer cannot be used ({message}).",
+  "m.ver.title": "Your game is version {from}: update it to {to}",
+  "m.ver.body": "Online play needs Splatoon 3 {to}, and this game is {from}. Update the game, then come back here.",
+  "m.ver.btn": "Update the game",
 } as const;
 
 export type CommunityDict = Record<keyof typeof community, string>;

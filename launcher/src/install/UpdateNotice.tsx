@@ -2,11 +2,11 @@
 // page when this launcher carries other engine code than the one installed. The truth first: a short update or a full
 // recompilation, how long, and why in one sentence. A long one (over two minutes) asks when: now (the installed game
 // stays playable meanwhile), when the launcher closes, or later; a short one is one click.
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { installApi, wizardIntent, type InstallRequest, type StepId, type UpdateCheck, type UpdatePreview } from "../api";
 import { useApp } from "../ctx";
 import { IconRefresh } from "../icons";
-import { approx, useW } from "./texts";
+import { approx, gb, useW } from "./texts";
 import { minutes, updateClass, updateWhy } from "./wait";
 
 type W = ReturnType<typeof useW>["w"];
@@ -62,8 +62,21 @@ export function UpdateSummary({ u, eta, etaMax, redo, from, to }: { u: UpdatePre
   );
 }
 
-/** Bundled commits whose notice was put off ("Later"), until the launcher restarts. */
+/** Bundled commits whose notice was put off ("Later", here or on the update bar), until the launcher restarts. */
 const putOff = new Set<string>();
+const putOffSubs = new Set<() => void>();
+let putOffSnapshot: ReadonlySet<string> = new Set();
+
+export function putOffGameUpdate(commit: string) {
+  putOff.add(commit);
+  putOffSnapshot = new Set(putOff);
+  putOffSubs.forEach((f) => f());
+}
+
+/** The put-off commits, live (the Play notice and the update bar share them). */
+export function usePutOffGameUpdates(): ReadonlySet<string> {
+  return useSyncExternalStore((f) => { putOffSubs.add(f); return () => putOffSubs.delete(f); }, () => putOffSnapshot);
+}
 
 /** The installed game against the launcher's code, asked once per page that shows it. */
 export function useUpdateCheck(): UpdateCheck | null {
@@ -88,18 +101,41 @@ async function requestFor(dir: string): Promise<InstallRequest> {
   return { ...info.request, install_dir: dir, allow_prereqs: false, force_rebuild: false };
 }
 
+/** Play page, for an install made for the previous game version: the game update is needed, said plainly (what it asks
+ *  for, what it keeps, what it deletes, what still works meanwhile). One button opens the wizard on that install. */
+function GameVersionNeeded({ check }: { check: UpdateCheck }) {
+  const { w } = useW();
+  const { go } = useApp();
+  const v = { from: check.game_from ?? "", to: check.game_to };
+  return (
+    <div className="upd-line upd-full" role="status">
+      <IconRefresh className="upd-ico" />
+      <div className="grow upd-text">
+        <p className="upd-title">{w("ver.title", v)}</p>
+        <p className="small">{w("ver.text", v)}</p>
+        <p className="small muted">{w("ver.keep", { ...v, need: gb(check.disk_need), freed: gb(check.old_bytes) })}</p>
+        <p className="small muted">{w("ver.files", { ...v, t: approx(check.eta) })}</p>
+      </div>
+      <div className="upd-actions">
+        <button className="btn btn-small" onClick={() => startUpdate(check.install_dir, go)}>{w("ver.go", v)}</button>
+      </div>
+    </div>
+  );
+}
+
 /** Play page: "Game update available", its truth, and when to run it. */
 export function GameUpdateNotice() {
   const { w } = useW();
   const { go, advanced, fail, toast } = useApp();
   const check = useUpdateCheck();
-  const [, setTick] = useState(0);
+  const off = usePutOffGameUpdates();
   const [scheduled, setScheduled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
-  if (!check?.available || !check.update || putOff.has(check.bundled_commit)) return null;
+  if (check?.available && check.game_from) return <GameVersionNeeded check={check} />;
+  if (!check?.available || !check.update || off.has(check.bundled_commit)) return null;
   const cls = updateClass(check.update, check.eta);
   const atClose = scheduled ?? check.at_close;
-  const later = () => { putOff.add(check.bundled_commit); setTick((n) => n + 1); };
+  const later = () => putOffGameUpdate(check.bundled_commit);
 
   // Now: straight to the install (it shows on the Play page and in the rail; the game stays playable). Only an update
   // that needs the player's files or a confirmation goes through the plan screen.

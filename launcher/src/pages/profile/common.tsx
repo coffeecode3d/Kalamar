@@ -1,6 +1,6 @@
 // Shared bits of the customisation tabs.
 import type { ReactNode } from "react";
-import type { GameCatalogue, GameEntry, Profile } from "../../api";
+import type { GameCatalogue, GameEntry, GearAbilitiesInfo, Profile } from "../../api";
 import type { TFn } from "../../i18n";
 
 export interface TabProps {
@@ -15,6 +15,8 @@ export interface TabProps {
   notes: Record<string, FieldNoteData>;
   /** Advanced mode: identifiers, sorting by id, the notes about how icons are matched. */
   advanced: boolean;
+  /** Whether the installed game applies sub-abilities and which abilities a sub slot can hold (null: not known yet). */
+  subs?: GearAbilitiesInfo | null;
 }
 
 /** `raw`: the runtime's own sentence, empty in the simple mode. */

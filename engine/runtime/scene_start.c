@@ -1,5 +1,7 @@
-// Splatoon 3 11.2.0: the start scene (start_scene / SPLAT3_START) and a trace of chosen guest function entries
+// Splatoon 3: the start scene (start_scene / SPLAT3_START) and a trace of chosen guest function entries
 // (TOTK_FN_TRACE), both through the function-entry hook every lifted function has (cpu.h FN_ENTER, main.c fnprof_hit).
+//
+// The main offsets below are 11.2.0's; the running build's are a row of splat3_addr.c.
 //
 // How the game picks its first scene. When the Boot scene is done, main+0x375338c (reached through a function
 // pointer) reads the first-boot flag of the save's game data (Plaza/IsDoneFirstBootSeq): clear, it requests
@@ -21,11 +23,12 @@
 #include "host.h"
 #include "platform/platform.h"
 #include "scene_start.h"
+#include "splat3_addr.h"
 
-#define BOOT_CHOICE 0x375338cull           // main offsets, Splatoon 3 11.2.0
-#define REQUEST_SCENE 0x3d2f440ull
-#define BOOT_PLAZA_CALL 0x37534c0ull        // bl REQUEST_SCENE ("Plaza")
-#define BOOT_PLAYERMAKE_CALL 0x3753478ull   // bl REQUEST_SCENE ("PlayerMake")
+static const Splat3Addr *s3;                // the running build's main offsets; NULL: nothing here runs
+#define REQUEST_SCENE (s3->request_scene)
+#define BOOT_PLAZA_CALL (s3->boot_plaza_call)             // bl REQUEST_SCENE ("Plaza")
+#define BOOT_PLAYERMAKE_CALL (s3->boot_playermake_call)   // bl REQUEST_SCENE ("PlayerMake")
 
 static uint64_t main_base;
 static int start_on;                 // a start scene waits for the boot choice's request
@@ -121,12 +124,13 @@ static void trace_hit(int k, uint64_t addr, uint64_t lr) {
 // entered again, "ReenterScene"). The scene states hang off main+0x60f24e0: object +0xd8 -> the next scene's states,
 // +0x6678 the local lobby's ({+0x30 IsLan, +0x34 Mode, +0x38 MyUserId}, the names its serializer main+0x34f8ee4
 // writes). The boot choice holds that object's mutex (+0x100) around its request, so the byte is written under it.
-#define SCENE_STATES 0x60f24e0ull
+#define SCENE_STATES (s3->scene_states)
 static int start_lan;     // lobby-lan
 static int start_plaza;   // plaza: in free play, without the title screen
 
 // A scene's state object for the next scene: *(*(*(main+0x60f24e0) + 0xd8) + off), 0 when unreadable.
 static uint64_t scene_state(uint64_t off) {
+    if (!s3) return 0;
     uint64_t p = main_base + SCENE_STATES;
     for (int i = 0; i < 2; i++) {   // *(main+0x60f24e0), then +0xd8
         if (!mem_guest_readable(p, 8)) return 0;
@@ -294,6 +298,11 @@ void scene_start_init(void) {
     if (!scene && !strncmp(v, "scene:", 6) && v[6]) scene = v + 6;   // any scene pack, for experiments
     if (!scene) {
         rt_log("start scene: unknown value \"%s\" (plaza, lobby, lobby-lan, range, story, scene:<Name>); ignored", v);
+        return;
+    }
+    s3 = splat3_addr();
+    if (!s3) {
+        rt_log("start scene: no main offsets for target %s; start_scene=%s ignored", rt_target.name, v);
         return;
     }
     if (!code_matches()) {

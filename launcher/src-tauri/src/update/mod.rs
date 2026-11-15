@@ -1,9 +1,10 @@
 //! The launcher updates itself from its GitHub releases, in a build that names a repository (`channel.rs`); without one
 //! this module is inert: no interface, no request.
 //!
-//! - **Check** (`check.rs`): at start, at most once per 24 hours, if the player keeps "check automatically" (on by
-//!   default), and on "Check now" (Settings, About). GitHub's public release API, no token, an ETag, a closed list of
-//!   hosts (`net.rs`); a failure is silent.
+//! - **Check** (`check.rs`): 20 seconds after every start and then every 6 hours while the launcher stays open, if the
+//!   player keeps "check automatically" (on by default), and on "Check now" (Settings, About). GitHub's public release
+//!   API, no token, an ETag (an unchanged answer is a bodiless 304), a closed list of hosts (`net.rs`); a failure is
+//!   silent.
 //! - **Trust** (`manifest.rs`): a release is offered only when its manifest is signed by a key compiled into the
 //!   launcher, names this repository, the release's own version and a version above the running one.
 //! - **Download**: only on the player's click, in the background, into `<data>\update\download\<tag>\`, resumed after a
@@ -38,7 +39,7 @@ use version::Version;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct UpdatePrefs {
-    /// Check at start, at most once a day. On by default (the feature only exists in a build that names a repository).
+    /// Check at every start and every 6 hours while open. On by default (the feature only exists in a build that names a repository).
     pub auto_check: bool,
     pub channel: Channel,
 }
@@ -49,14 +50,17 @@ impl Default for UpdatePrefs {
     }
 }
 
-/// At most one automatic check per this many seconds.
-pub const CHECK_EVERY: u64 = 24 * 3600;
+/// While the launcher stays open, the automatic check repeats this often (the first one is `AUTO_DELAY` after start).
+pub const AUTO_EVERY: Duration = Duration::from_secs(6 * 3600);
 /// "Check now" pressed again within this many seconds gives the last answer.
 const MANUAL_GAP: u64 = 30;
-/// "Later" puts the Play page's line off for this long (the About section still shows the update).
-const LATER_FOR: u64 = 24 * 3600;
 /// The automatic check waits this long after start: never on the first screen's path.
 pub const AUTO_DELAY: Duration = Duration::from_secs(20);
+
+/// How long to wait before the next automatic check: `AUTO_DELAY` for the first one after start, `AUTO_EVERY` after.
+pub fn auto_wait(first: bool) -> Duration {
+    if first { AUTO_DELAY } else { AUTO_EVERY }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -109,7 +113,8 @@ pub struct UpdateView {
     /// The last check's failure: `network`, `rate_limited`, `untrusted`.
     pub check_error: Option<String>,
     pub available: Option<AvailableView>,
-    /// The Play page's line was put off for this version.
+    /// "Later" was pressed for this version during this run of the launcher: the bar is quiet and the start dialog is
+    /// not shown again (nothing is remembered across starts).
     pub later: bool,
     /// `idle`, `downloading`, `ready`, `applying`, `restarting`, `saved`.
     pub phase: &'static str,
@@ -143,6 +148,8 @@ struct Inner {
     error: Option<String>,
     notice: Option<NoticeView>,
     lock: Option<apply::Lock>,
+    /// The version "Later" was pressed for, in this run only.
+    later: Option<String>,
 }
 
 pub struct Updater {
@@ -187,7 +194,7 @@ impl Updater {
             exe,
             temp,
             place: std::sync::OnceLock::new(),
-            inner: Mutex::new(Inner { state, checking: false, last_attempt: 0, check_error: None, found: None, phase: Phase::Idle, error: None, notice, lock: None }),
+            inner: Mutex::new(Inner { state, checking: false, last_attempt: 0, check_error: None, found: None, phase: Phase::Idle, error: None, notice, lock: None, later: None }),
             cancel: AtomicBool::new(false),
         };
         if u.source.is_some() {
@@ -320,7 +327,6 @@ impl Updater {
     }
 
     pub fn view(&self, prefs: &UpdatePrefs, blocked: Option<&'static str>) -> UpdateView {
-        let now = crate::util::now_secs();
         let g = self.lock();
         let available = g.found.as_ref().map(|f| {
             let (mode, why) = self.mode_for(&f.manifest);
@@ -334,8 +340,8 @@ impl Updater {
                 why,
             }
         });
-        let later = match (&g.found, &g.state.later) {
-            (Some(f), Some((v, until))) => *v == f.manifest.version.to_string() && now < *until,
+        let later = match (&g.found, &g.later) {
+            (Some(f), Some(v)) => *v == f.manifest.version.to_string(),
             _ => false,
         };
         UpdateView {
@@ -368,12 +374,6 @@ impl Updater {
             },
             notice: g.notice.clone(),
         }
-    }
-
-    /// An automatic check is due (once per day; a clock put back by more than an hour counts as due).
-    pub fn due(&self, now: u64) -> bool {
-        let last = self.lock().state.last_check;
-        now >= last.saturating_add(CHECK_EVERY) || last > now + 3600
     }
 
     /// One check. `manual`: "Check now" (a second press within 30 s gives the last answer). `on_start` is called once
@@ -447,14 +447,11 @@ impl Updater {
         }
     }
 
-    /// "Later" on the Play page.
+    /// "Later" (the bar, the start dialog): quiet until the launcher is started again; not saved.
     pub fn later(&self) {
         let mut g = self.lock();
-        if let Some(f) = &g.found {
-            g.state.later = Some((f.manifest.version.to_string(), crate::util::now_secs() + LATER_FOR));
-            let s = g.state.clone();
-            drop(g);
-            self.save_state(&s);
+        if let Some(v) = g.found.as_ref().map(|f| f.manifest.version.to_string()) {
+            g.later = Some(v);
         }
     }
 
@@ -815,7 +812,9 @@ pub fn updater(data_dir: &Path, prefs: &UpdatePrefs) -> Updater {
     Updater::new(channel::source(), data_dir, env!("CARGO_PKG_VERSION"), std::env::current_exe().ok(), apply::temp_roots(), prefs.channel)
 }
 
-/// After `setup`: removes leftovers of earlier updates and schedules the automatic check (20 s after start, when due).
+/// After `setup`: removes leftovers of earlier updates and schedules the automatic checks (20 s after start, then every
+/// 6 hours while the launcher stays open). Each round reads the player's switch again; a check at every start costs one
+/// conditional request, answered 304 when nothing changed.
 pub fn start(app: &AppHandle) {
     let upd = app.state::<Updater>();
     if !upd.enabled() {
@@ -827,13 +826,17 @@ pub fn start(app: &AppHandle) {
     }
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(AUTO_DELAY).await;
-        let p = prefs(&app2);
-        let upd = app2.state::<Updater>();
-        if p.auto_check && upd.due(crate::util::now_secs()) {
-            let app3 = app2.clone();
-            upd.check(p.channel, false, &move || emit(&app3)).await;
-            emit(&app2);
+        let mut first = true;
+        loop {
+            tokio::time::sleep(auto_wait(first)).await;
+            first = false;
+            let p = prefs(&app2);
+            if p.auto_check {
+                let upd = app2.state::<Updater>();
+                let app3 = app2.clone();
+                upd.check(p.channel, false, &move || emit(&app3)).await;
+                emit(&app2);
+            }
         }
     });
 }

@@ -146,6 +146,8 @@ input[type="checkbox"]:checked:not(.switch input)::after { border-color: #2b2200
 .code-box { background: rgba(4, 2, 20, 0.75); color: var(--lemon); border: 2px dashed rgba(255, 226, 61, 0.5); border-radius: var(--r-md); }
 .code-card { background: linear-gradient(150deg, rgba(255, 226, 61, 0.14), var(--surface) 60%); border-color: rgba(255, 226, 61, 0.5); }
 .stage { background: rgba(8, 6, 28, 0.82); backdrop-filter: blur(22px); }
+/* A dialog sits on a busy page: nearly opaque, so that what is behind it does not show through its text. */
+.modal { background: rgba(20, 14, 50, 0.97); backdrop-filter: blur(14px); }
 .ripple { border-color: var(--lemon); }
 .step-v.now .step-dot { border-color: var(--lemon); box-shadow: 0 0 0 0.3rem rgba(255, 226, 61, 0.2); }
 .step-v.now .step-dot span { background: var(--lemon); }

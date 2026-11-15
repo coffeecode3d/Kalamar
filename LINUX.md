@@ -4,7 +4,7 @@ This fork ([coffeecode3d/Kalamar](https://github.com/coffeecode3d/Kalamar)) port
 publishes it as an AppImage, the equivalent of the Windows release's `Kalamar.exe`. It is not affiliated with the
 upstream project; the engine, the wizard's steps and the game itself are the upstream work.
 
-**Nothing of the game is in this repository or in the AppImage.** You need your own copy of Splatoon 3 and its 11.2.0
+**Nothing of the game is in this repository or in the AppImage.** You need your own copy of Splatoon 3 and its 11.3.0
 update, dumped from your own console, with your console's keys — see the upstream
 [README](README.md) and [docs/getting-started.md](docs/getting-started.md). The launcher builds the game on your PC
 from those files.
@@ -55,7 +55,7 @@ The launcher keeps its data in `$XDG_DATA_HOME/dev.kalamar.launcher` (`~/.local/
   .NET 10 SDK are required. The release workflow can bundle Linux prebuilts later without changing the wizard.
 - **Paths and names**: `build/splat3` and `xlate/totk_xlate` (no `.exe`), POSIX steps, data under XDG directories.
 - **Base game files**: the wizard accepts an NSP or an XCI cartridge image for the base game (the secure partition's
-  NCAs); the 11.2.0 update is an NSP.
+  NCAs); the 11.3.0 update is an NSP (an 11.2.0 install is offered the 11.3.0 update by the launcher).
 - **System integration**: process groups (cancelling the wizard kills the whole build tree), `/proc` scans for "is the
   game running" and "another launcher instance", `xdg-open` for folders, `nice` for low-priority builds.
 - **Self-update** stays off in this build (no update repository is named): update by downloading the new AppImage.
@@ -93,7 +93,7 @@ To run the wizard without its window (useful on a headless machine, or to keep t
 ```sh
 cd launcher/src-tauri
 cargo run --example install_headless -- --plan \
-  --dir "$HOME/Kalamar" --base <base.nsp> --update <11.2.0 update.nsp> --keys <prod.keys>
+  --dir "$HOME/Kalamar" --base <base.nsp> --update <11.3.0 update.nsp> --keys <prod.keys>
 # then without --plan to install, adding --jobs N or --stop-before compile if wanted
 ```
 
@@ -120,8 +120,8 @@ Linux build. Verified in this fork:
 
 Not verified here, and worth reporting:
 
-- A full install from real game files on Linux (Arch, 16 cores, 31 GB): an XCI base and the 11.2.0 update NSP, in
-  about 7 minutes, ending with the wizard's self-checks (`--selftest`, `--probe-profile`) passing and `build/splat3`
+- A full install from real game files on Linux (Arch, 16 cores, 31 GB): an XCI base and the 11.2.0 update NSP (the
+  version then current; the same steps now build 11.3.0), in about 7 minutes, ending with the wizard's self-checks (`--selftest`, `--probe-profile`) passing and `build/splat3`
   linked.
 - Playing the built game: started offline with `KLM_XLATE` and the profile, 1043 frames in 21.7 s (mean 48 fps on the
   first run, while shaders are translated; the frame times settle as the cache fills). No missing shared libraries.

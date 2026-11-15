@@ -11,11 +11,7 @@ use std::path::Path;
 /// Title id of the game and of its update.
 pub const TITLE_BASE: u64 = 0x0100_C250_0FC2_0000;
 pub const TITLE_UPDATE: u64 = 0x0100_C250_0FC2_0800;
-/// Update 11.2.0: its content-meta version and the name of its Program NCA (the NCA id is a hash of its content).
-pub const UPDATE_VERSION: u64 = 2_686_976;
-pub const UPDATE_PROGRAM_NCA: &str = "aada92e014fb1a953bbb735fceb491a9.nca";
-/// Size of the merged RomFS image of 11.2.0 (for the progress of the merge step).
-pub const ROMFS_SIZE_1120: u64 = 10_058_308_364;
+use super::gamever::{CURRENT, PREVIOUS};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Entry {
@@ -228,6 +224,14 @@ fn has_update_ticket(entries: &[Entry]) -> bool {
     entries.iter().any(|e| e.name.ends_with(".tik") && e.name.to_ascii_lowercase().starts_with(&id))
 }
 
+/// `update_previous`: the file is the update Kalamar built before; `version` is what it is, `needed` what Kalamar needs now.
+fn previous_update() -> FileCheck {
+    let mut c = check("bad", "update_previous");
+    c.params.push(("version".into(), PREVIOUS.display.into()));
+    c.params.push(("needed".into(), CURRENT.display.into()));
+    c
+}
+
 fn version_text(v: u64) -> String {
     format!("v{}", v >> 16)
 }
@@ -242,7 +246,7 @@ pub fn check_base(path: &Path) -> FileCheck {
     let prog = program_nca(&info.entries);
     let mut c = match (&info.meta, prog) {
         (_, None) => check("bad", "no_program"),
-        (_, Some(p)) if p.name == UPDATE_PROGRAM_NCA || has_update_ticket(&info.entries) => check("bad", "base_is_update"),
+        (_, Some(p)) if p.name == CURRENT.update_program_nca || p.name == PREVIOUS.update_program_nca || has_update_ticket(&info.entries) => check("bad", "base_is_update"),
         (Some(m), _) if m.title_id == TITLE_UPDATE => check("bad", "base_is_update"),
         (Some(m), _) if m.kind == "Application" && m.title_id == TITLE_BASE => check("ok", "base_ok"),
         (Some(m), _) if m.title_id != TITLE_BASE => {
@@ -268,11 +272,15 @@ pub fn check_update(path: &Path) -> FileCheck {
     let prog = program_nca(&info.entries);
     let mut c = match (&info.meta, prog) {
         (_, None) => check("bad", "no_program"),
-        (_, Some(p)) if p.name == UPDATE_PROGRAM_NCA => check("ok", "update_ok"),
-        (Some(m), _) if m.kind == "Patch" && m.title_id == TITLE_UPDATE && m.version == UPDATE_VERSION => check("ok", "update_ok"),
+        (_, Some(p)) if p.name == CURRENT.update_program_nca => check("ok", "update_ok"),
+        (Some(m), _) if m.kind == "Patch" && m.title_id == TITLE_UPDATE && m.version == CURRENT.update_version => check("ok", "update_ok"),
+        // The previous version's update: named for what it is (it was the one Kalamar used before), not "another version".
+        (_, Some(p)) if p.name == PREVIOUS.update_program_nca => previous_update(),
+        (Some(m), _) if m.kind == "Patch" && m.title_id == TITLE_UPDATE && m.version == PREVIOUS.update_version => previous_update(),
         (Some(m), _) if m.kind == "Patch" && m.title_id == TITLE_UPDATE => {
             let mut c = check("bad", "update_wrong_version");
             c.params.push(("version".into(), version_text(m.version)));
+            c.params.push(("needed".into(), CURRENT.display.into()));
             c
         }
         (Some(m), _) if m.title_id == TITLE_BASE => check("bad", "update_is_base"),
@@ -413,7 +421,9 @@ mod tests {
     }
 
     const BASE_XML: &str = "<ContentMeta><Type>Application</Type><Id>0x0100c2500fc20000</Id><Version>0</Version></ContentMeta>";
-    const UPD_XML: &str = "<ContentMeta><Type>Patch</Type><Id>0x0100c2500fc20800</Id><Version>2686976</Version></ContentMeta>";
+    fn patch_xml(version: u64) -> String {
+        format!("<ContentMeta><Type>Patch</Type><Id>0x0100c2500fc20800</Id><Version>{version}</Version></ContentMeta>")
+    }
     const OLD_XML: &str = "<ContentMeta><Type>Patch</Type><Id>0x0100c2500fc20800</Id><Version>2621440</Version></ContentMeta>";
 
     #[test]
@@ -422,7 +432,7 @@ mod tests {
         let c = check_base(&base);
         assert_eq!((c.status, c.code), ("ok", "base_ok"));
         assert_eq!(c.program_size, Some(64));
-        let upd = write("u", &nsp(&[("x.cnmt.xml", UPD_XML.as_bytes()), (UPDATE_PROGRAM_NCA, &[0u8; 32])]));
+        let upd = write("u", &nsp(&[("x.cnmt.xml", patch_xml(CURRENT.update_version).as_bytes()), (CURRENT.update_program_nca, &[0u8; 32])]));
         assert_eq!(check_update(&upd).code, "update_ok");
         // swapped files are named as such
         assert_eq!(check_base(&upd).code, "base_is_update");
@@ -433,11 +443,32 @@ mod tests {
     }
 
     #[test]
+    fn the_previous_update_is_named_for_what_it_is() {
+        // With its content-meta XML, with only its Program NCA's name, and given as the base game.
+        let with_xml = write("p1", &nsp(&[("x.cnmt.xml", patch_xml(PREVIOUS.update_version).as_bytes()), ("0123.nca", &[0u8; 32])]));
+        let by_nca = write("p2", &nsp(&[(PREVIOUS.update_program_nca, &[0u8; 32])]));
+        for p in [&with_xml, &by_nca] {
+            let c = check_update(p);
+            assert_eq!((c.status, c.code), ("bad", "update_previous"));
+            assert_eq!(c.params, [("version".to_string(), PREVIOUS.display.to_string()), ("needed".to_string(), CURRENT.display.to_string())]);
+        }
+        assert_eq!(check_base(&with_xml).code, "base_is_update");
+        assert_eq!(check_base(&by_nca).code, "base_is_update");
+        // The current update is still accepted by either mark.
+        let now = write("p3", &nsp(&[("x.cnmt.xml", patch_xml(CURRENT.update_version).as_bytes()), ("0123.nca", &[0u8; 32])]));
+        assert_eq!(check_update(&now).code, "update_ok");
+        for p in [with_xml, by_nca, now] {
+            std::fs::remove_file(p).unwrap();
+        }
+    }
+
+    #[test]
     fn wrong_or_unknown_updates() {
         let old = write("o", &nsp(&[("x.cnmt.xml", OLD_XML.as_bytes()), ("0123.nca", &[0u8; 32])]));
         let c = check_update(&old);
         assert_eq!((c.status, c.code), ("bad", "update_wrong_version"));
         assert_eq!(c.params[0].1, "v40");
+        assert_eq!(c.params[1], ("needed".to_string(), CURRENT.display.to_string()));
         // no XML in the dump: accepted, checked again after extraction
         let bare = write("n", &nsp(&[("0123.nca", &[0u8; 32])]));
         assert_eq!(check_update(&bare).status, "warn");

@@ -22,7 +22,9 @@ into the save, then the game boots straight to the plaza with that character. `r
   "gear": {"head": 1018, "clothes": 5001, "shoes": 6003},
   "weapon": 50,
   "emote": 7,
-  "unlock_all": false
+  "unlock_all": false,
+  "gear_abilities": {"head": ["<ability>", "<ability>", null], "clothes": [3, 3, 3]},
+  "chunks": "max"
 }
 ```
 
@@ -40,6 +42,8 @@ into the save, then the game boots straight to the plaza with that character. `r
 | `weapon` | `WeaponInfoMain` ids of `Type: Versus` | `Coordinates/WeaponId` |
 | `emote` | `EmoteInfo` ids | `Coordinates/WinEmote` |
 | `unlock_all` | `true` owns every weapon, gear, banner, title word and emote of those tables | the ownership maps below |
+| `gear_abilities` (prototype) | `head`, `clothes`, `shoes`: three sub abilities each, as a name of main's ability enum, the enum's value, or `null` (also `"None"`, -1) for an empty slot; only the abilities a sub slot can hold (the enum's values below 100) | `ExSkillArray` and `Rarity` of the equipped piece's ownership record ([Sub abilities](#sub-abilities)) |
+| `chunks` (prototype) | `"max"` (999) or a count 0 to 999 | `HaveSkillChipMap[ability]` = the count, for every ability a sub slot can hold |
 
 Every id is checked against the game's own RomFS tables (`RSDB/*.rstbl.byml.zs`); a profile with a bad value leaves the
 save untouched and logs why. The appearance goes into both copies the save keeps (`Common/Coordinates` and the player
@@ -64,6 +68,31 @@ leaves those ids out and a profile that equips one is refused, so applying the s
 
 Badges are only equipped when the save already owns them: no save seen so far owns one, so how the game records a
 badge (`Common/HaveNamePlateBadgeMap`, `LastPlayHaveBadgeMap`) is not known.
+
+## Sub abilities
+
+Prototype (branch `gear`). What the save holds, measured on test saves by editing them and decoding what the game wrote
+back at its next commit:
+
+- A piece's abilities exist only in its ownership record, `HaveGear{Head,Clothes,Shoes}Map[id]` of the player data:
+  `MainSkill`, `ExSkillArray` (one integer per sub slot: an ability enum value, -1 when empty), `Rarity`, `Exp`,
+  `TotalExp`, `LastPlayDateTimeUtc`, `RandomContext`. The equipped gear (`Coordinates/Gear...Id`) is an id only: it
+  names the record. No field holds a slot count or a brand; the brand is the gear table's.
+- The game ties the slot count to `Rarity` when it loads the save: a record of rarity 0 given three sub abilities came
+  back with one, rarity 2 kept three, a fourth entry was dropped, rarity 5 was kept as written with three slots. So
+  `gear_abilities` raises `Rarity` to 2 on a piece that has less, which the game shows as that piece's stars.
+- Kept as written: the same ability three times, an empty slot between two filled ones.
+- An ability of the main-only group (enum value 100 and more) in a sub slot came back as 0, the first ability of the
+  enum, not as an empty slot: the profile refuses those instead of writing them.
+- `HaveSkillChipMap` (empty in a new save) kept the entries `ability value: count` written as plain integers. Whether
+  the game's own screens spend them was not looked at.
+
+`gear_abilities` applies to the pieces equipped once the profile's `gear` is in (the profile's, else the save's), and
+only to the parts it names. A profile whose `gear_abilities` or `chunks` is malformed, names an unknown ability or puts
+a main-only ability in a sub slot is refused whole, as for the other fields. In a match the game sends each player's
+gear abilities to the others: the result file lists them ([auto-match.md](auto-match.md), "The result"). With the
+room's `main_abilities_only=1` the record of both players' games held every sub slot empty while the saves kept
+theirs. That an ability in the record changes the play (speed, ink use) was not measured.
 
 ## When it is applied
 

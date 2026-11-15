@@ -352,18 +352,24 @@ pub fn physical_cores() -> usize {
 
 /// Running processes whose executable is exactly `exe` (full path, case-insensitive).
 pub fn count_image(exe: &Path) -> usize {
+    pids_of_image(exe).len()
+}
+
+/// The ids of the running processes whose executable is exactly `exe` (full path, case-insensitive): never a program of
+/// the same name elsewhere.
+pub fn pids_of_image(exe: &Path) -> Vec<u32> {
     #[cfg(windows)]
     {
         use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
         use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
         let want = exe.display().to_string().to_ascii_lowercase();
         let name = exe.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-        let mut n = 0;
+        let mut found = Vec::new();
         // SAFETY: handles checked and closed; buffers sized as the APIs require.
         unsafe {
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             if snap.is_null() || snap == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-                return 0;
+                return found;
             }
             let mut e: PROCESSENTRY32W = std::mem::zeroed();
             e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
@@ -378,7 +384,7 @@ pub fn count_image(exe: &Path) -> usize {
                         if QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut size) != 0
                             && String::from_utf16_lossy(&buf[..size as usize]).to_ascii_lowercase() == want
                         {
-                            n += 1;
+                            found.push(e.th32ProcessID);
                         }
                         windows_sys::Win32::Foundation::CloseHandle(h);
                     }
@@ -387,7 +393,7 @@ pub fn count_image(exe: &Path) -> usize {
             }
             windows_sys::Win32::Foundation::CloseHandle(snap);
         }
-        n
+        found
     }
     #[cfg(target_os = "linux")]
     {
@@ -395,12 +401,12 @@ pub fn count_image(exe: &Path) -> usize {
         proc_pids()
             .into_iter()
             .filter(|pid| std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|p| p == want))
-            .count()
+            .collect()
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = exe;
-        0
+        Vec::new()
     }
 }
 

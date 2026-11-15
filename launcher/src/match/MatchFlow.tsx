@@ -40,6 +40,11 @@ export function useMatchFlow(): Flow {
   return f;
 }
 
+/** The phase of the match flow, "idle" where there is no flow (the first-run window has none). */
+export function useMatchPhase(): Phase {
+  return useContext(FlowCtx)?.phase ?? "idle";
+}
+
 /** Steps shown while connecting; `states` are the runtime states that mean "this step is under way". */
 export const STEPS: Record<MatchRole, { key: Key; states: string[] }[]> = {
   host: [

@@ -672,6 +672,35 @@ static void sleep_until(uint64_t deadline) {
     }
 }
 
+// Low-latency pacing (TOTK_LOW_LATENCY, on by default; not on Tears of the Kingdom, whose frames do their heavy work
+// between the acquire and the present). The per-image rule below makes a game with N window images wait until the
+// frame N - 1 slots back is shown, so with Splatoon 3's three images every finished frame was held two periods (measured
+// at 60 fps: present call to display 31 ms, input read to display 48 ms). Here the acquire waits until the next slot
+// minus the lead, the time this game takes from the acquire to its present call (the largest of the last 16 frames plus
+// a margin): the frame is presented just before its slot, and the game's next input read comes right after it. A frame
+// that takes longer than the lead is late by the difference and shown at once (pace keeps the phase).
+// The state is the host's: NVNwindow's storage has no room to spare.
+enum { LL_FRAMES = 16, LL_MARGIN_NS = 1000000 };
+static struct { const win_t *w; uint64_t free_at, acquired, work[LL_FRAMES]; unsigned n; } ll;
+
+static int low_latency(void) { return !RT_TOTK && cfg_bool("TOTK_LOW_LATENCY"); }
+
+// After a present held to slot: when the next acquire returns.
+static void ll_present(const win_t *o, uint64_t now, uint64_t slot, uint64_t period) {
+    if (ll.w != o) memset(&ll, 0, sizeof ll), ll.w = o;
+    if (ll.acquired && now >= ll.acquired) {
+        uint64_t work = now - ll.acquired;
+        ll.work[ll.n++ % LL_FRAMES] = work < period ? work : period;
+    }
+    ll.acquired = 0;
+    uint64_t lead = 0;
+    for (int i = 0; i < LL_FRAMES; i++) if (ll.work[i] > lead) lead = ll.work[i];
+    lead += LL_MARGIN_NS;
+    if (lead > period) lead = period;
+    // the frame queue lets the game run one more period ahead
+    ll.free_at = slot + period - lead - (cfg_bool("TOTK_FRAME_QUEUE") ? period : 0);
+}
+
 // NVNwindowAcquireTextureResult nvnWindowAcquireTexture(NVNwindow *w, NVNsync *s, int *index): blocks here, not in the
 // present, until the image is free (the game often presents with a lock held). Without the frame queue that is the
 // image's previous present plus one period, when the next frame goes to the display, so a frame gets exactly one period
@@ -686,12 +715,14 @@ NVN_API(nvnWindowAcquireTexture) {
     NVN_BLOCKING();
     int idx = o->active ? o->next++ % o->active : 0;
     *out = idx;
-    uint64_t at = idx < 4 ? o->avail[idx] : 0;
+    int low = low_latency();
+    uint64_t at = low && ll.w == o ? ll.free_at : idx < 4 ? o->avail[idx] : 0;
     if (at) {
         uint64_t p0 = perf_begin();
         sleep_until(at);
         perf_end(PERF_PACE, p0);
     }
+    if (low && (ll.w == o || !ll.w)) ll.w = o, ll.acquired = kern_now_ns();
     // The sync means "the display no longer reads this image". Presents are copies queued in submit order, so it is
     // already satisfied: fenced = 3 with fence 0.
     if (s) {
@@ -724,6 +755,8 @@ NVN_API(nvnQueuePresentTexture) {
     o->ticket[idx] = o->presents;
     flight_swap_interval = o->interval;
     o->avail[idx] = cfg_bool("TOTK_FRAME_QUEUE") ? slot : slot + period;
+    if (low_latency()) ll_present(o, now, slot, period);
+    else ll.w = NULL;   // switched off while running: the per-image rule again
     frame_step_present(slot, o->interval);   // frame_rate.c: the real-time step follows the display times
     rt_frame_presented(t, o->presents);
 }

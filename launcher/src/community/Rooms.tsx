@@ -11,6 +11,7 @@ import { GameCheckNotice, useGameBlocked } from "./GameCheck";
 import { IconCopy } from "../icons";
 import { useApp } from "../ctx";
 import { RoomStands } from "./Stands";
+import { OpenGameNotice } from "./OpenGame";
 
 /** Rated or not, and (advanced mode) how the server decides the result. */
 function Policy({ meta, id, ladder }: { meta: J; id: string | null | undefined; ladder: J }) {
@@ -216,6 +217,7 @@ function RoomView({ room, meta }: { room: J; meta: J }) {
         )}
       </article>
       {room.state !== "open" && <p className="notice notice-info">{c("room.state.in_match")}</p>}
+      {open && <OpenGameNotice />}
       <div className="cm-teams">
         {team("alpha", cap[0] ?? 4)}
         {team("bravo", cap[1] ?? 4)}

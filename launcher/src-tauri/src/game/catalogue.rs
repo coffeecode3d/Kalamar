@@ -803,14 +803,14 @@ mod tests {
         let table = |rows: Vec<Byml>| raw_frame(&byml_build::encode(&Byml::Array(rows)));
         let mut files: Vec<(String, Vec<u8>)> = vec![
             (
-                "RSDB/GearInfoHead.Product.b20.rstbl.byml.zs".into(),
+                "RSDB/GearInfoHead.Product.b30.rstbl.byml.zs".into(),
                 table(vec![
                     row(vec![("Id", i(1000)), ("__RowId", s("Hed_CAP000")), ("Brand", s("B07")), ("Skill", s("SubSpec_Up")), ("HowToGet", s("Shop")), ("Rarity", i(2)), ("Season", i(1))]),
                     row(vec![("Id", i(20001)), ("__RowId", s("Hed_COP001")), ("Brand", s("B97")), ("Skill", s("None")), ("HowToGet", s("Impossible")), ("Rarity", i(2)), ("Season", i(0))]),
                 ]),
             ),
             (
-                "RSDB/WeaponInfoMain.Product.b20.rstbl.byml.zs".into(),
+                "RSDB/WeaponInfoMain.Product.b30.rstbl.byml.zs".into(),
                 table(vec![
                     row(vec![
                         ("Id", i(0)),
@@ -825,19 +825,19 @@ mod tests {
                 ]),
             ),
             (
-                "RSDB/HairInfo.Product.b20.rstbl.byml.zs".into(),
+                "RSDB/HairInfo.Product.b99.rstbl.byml.zs".into(),
                 table(vec![
                     row(vec![("Id", i(0)), ("__RowId", s("Har_SQD000")), ("Order", i(20)), ("IsSquid", Byml::Bool(true))]),
                     row(vec![("Id", i(830)), ("__RowId", s("Har_OCT000_SdodrCstm00")), ("Order", i(120)), ("IsSquid", Byml::Bool(false))]),
                     row(vec![("Id", i(600)), ("__RowId", s("Har_OCT_RVL000")), ("Order", i(-1)), ("IsSquid", Byml::Bool(false))]),
                 ]),
             ),
-            ("RSDB/BynameAdjectiveInfo.Product.b20.rstbl.byml.zs".into(), table(vec![row(vec![("Id", i(3)), ("HowToGet", s("Shop")), ("Season", i(0))])])),
-            ("RSDB/BynameSubjectInfo.Product.b20.rstbl.byml.zs".into(), table(vec![row(vec![("Id", i(3)), ("HowToGet", s("Shop")), ("Season", i(0))])])),
+            ("RSDB/BynameAdjectiveInfo.Product.b30.rstbl.byml.zs".into(), table(vec![row(vec![("Id", i(3)), ("HowToGet", s("Shop")), ("Season", i(0))])])),
+            ("RSDB/BynameSubjectInfo.Product.b30.rstbl.byml.zs".into(), table(vec![row(vec![("Id", i(3)), ("HowToGet", s("Shop")), ("Season", i(0))])])),
             ("UI/Icon/Gear/Hed_CAP000.bntx.zs".into(), raw_frame(b"BNTX")),
             // Stages (made-up scenes): a label without the digits, a name in one language, a stage the lists hide.
             (
-                "RSDB/VersusSceneInfo.Product.b20.rstbl.byml.zs".into(),
+                "RSDB/VersusSceneInfo.Product.b30.rstbl.byml.zs".into(),
                 table(vec![
                     row(vec![("Id", i(3)), ("__RowId", s("Vss_Plaza03")), ("DisplayOrder", i(2)), ("IsDisplayInStageList", Byml::Bool(true))]),
                     row(vec![("Id", i(9)), ("__RowId", s("Vss_Hidden00")), ("DisplayOrder", i(9)), ("IsDisplayInStageList", Byml::Bool(false))]),
@@ -891,7 +891,9 @@ mod tests {
                 ("CommonMsg/Byname/BynameSubject.msbt", &subj_m),
                 ("CommonMsg/Weapon/WeaponName_Main.msbt", &wpn_m),
             ]);
-            files.push((format!("Mals/{region}.Product.b20.sarc.zs"), raw_frame(&sarc)));
+            // The build's name tag differs between builds (b20, b30...): names are found whatever the tag, even a mixed one.
+            let tag = if region == "EUfr" { "b99" } else { "b30" };
+            files.push((format!("Mals/{region}.Product.{tag}.sarc.zs"), raw_frame(&sarc)));
         }
         let dir = std::env::temp_dir().join(format!("s3l-cat-{}", crate::util::random_hex(4)));
         std::fs::create_dir_all(&dir).unwrap();

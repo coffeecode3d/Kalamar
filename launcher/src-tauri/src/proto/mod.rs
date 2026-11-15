@@ -178,6 +178,11 @@ impl Handler for ConnHandler {
 /// 1.1.9: how far each of the server's relays is from this computer, when measured (`relayping::RelayJob::known`;
 /// nothing is measured here).
 pub async fn declare_game(client: &Client, host: Arc<dyn GameHost>, relay_rtt: Option<relayping::Rtt>) -> Result<(), http::CallError> {
+    // A game of another version than this launcher's build is not offered to any server: its build differs from every
+    // current one, and no match may start with it (`GameHost::game_outdated`).
+    if host.game_outdated() {
+        return Ok(());
+    }
     let build = host.build_id();
     let h = host.clone();
     let info = tokio::task::spawn_blocking(move || h.engine()).await.ok().flatten();

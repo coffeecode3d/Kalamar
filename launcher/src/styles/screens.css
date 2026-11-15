@@ -64,6 +64,9 @@
 /* Settings changed while an installation runs: said once, above the fields. */
 .set-installing { margin: 0 0 var(--sp-3); padding: 0.55rem 0.85rem; border-radius: var(--r-md); background: var(--mint-soft); border: 1px solid rgba(46, 230, 192, 0.35); font-size: var(--fs-sm); }
 
+/* The column of the content: the update bar (every page) above the scrolling page, so the bar never covers it. */
+.content { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.content > .main { flex: 1 1 auto; min-height: 0; }
 .main { min-width: 0; overflow-y: auto; padding: var(--sp-6) var(--sp-6) var(--sp-7); position: relative; }
 .page-anim { animation: pageIn var(--t-med) var(--ease); }
 @keyframes pageIn { from { opacity: 0; transform: translateY(0.4rem); } to { opacity: 1; transform: none; } }
@@ -87,7 +90,7 @@
 
 /* ---- Play ------------------------------------------------------------------------------------------------- */
 /* The main block takes the room the page leaves: a launcher's first screen, not a form. */
-.page-play { min-height: calc(100vh - var(--sp-6) - var(--sp-7)); }
+.page-play { min-height: calc(100vh - var(--sp-6) - var(--sp-7) - var(--ubar-h, 0px)); }
 .page-play > .hero-play { flex: 1 0 auto; }
 /* With the advanced tools below, the main block keeps its own height so that the tools are in view. */
 .page-play.has-adv { min-height: 0; }
@@ -161,6 +164,35 @@
 .lup-warn .upd-ico { color: var(--amber); }
 .lup-in-about { background: var(--blue-soft); }
 .lup-channel { align-items: center; gap: var(--sp-3); }
+.lup-dialog-new { font-size: var(--fs-md); margin: var(--sp-3) 0 var(--sp-1); }
+.lup-dialog-notes { max-height: 16rem; }
+/* The update bar: the top of every page. One row (it wraps on a narrow window); compact during a match. */
+.ubar { flex: none; display: flex; align-items: center; gap: var(--sp-3) var(--sp-4); flex-wrap: wrap; padding: var(--sp-2) var(--sp-6); background: rgba(8, 6, 28, 0.82); border-bottom: 1px solid rgba(79, 166, 255, 0.5); }
+.ubar .upd-ico { margin: 0; }
+.ubar-ok { border-bottom-color: rgba(46, 230, 192, 0.5); }
+.ubar-ok .upd-ico { color: var(--mint); }
+.ubar-warn { border-bottom-color: rgba(255, 185, 56, 0.55); }
+.ubar-warn .upd-ico { color: var(--amber); }
+.ubar-bad { border-bottom-color: rgba(255, 61, 133, 0.55); }
+.ubar-bad .upd-ico { color: var(--magenta); }
+.ubar-text { flex: 1 1 18rem; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.ubar-text p { margin: 0; }
+.ubar-title { font-weight: 650; overflow-wrap: anywhere; }
+.ubar-state { font-size: var(--fs-sm); color: var(--text-2); overflow-wrap: anywhere; }
+.ubar-error { font-size: var(--fs-sm); color: var(--red); display: flex; align-items: flex-start; gap: var(--sp-1); }
+.ubar-error svg { flex: none; width: 1em; height: 1em; margin-top: 0.15em; }
+.ubar-progress { flex: 0 1 14rem; height: 0.5rem; border-radius: 99px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.ubar-progress span { display: block; height: 100%; background: var(--blue); transition: width 200ms linear; }
+.ubar-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-left: auto; }
+.ubar-compact { padding-top: 0.2rem; padding-bottom: 0.2rem; flex-wrap: nowrap; }
+.ubar-compact .ubar-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-sm); }
+.ubar-compact .ubar-text { flex-basis: 0; }
+.ubar-compact .ubar-progress { flex-basis: 6rem; }
+.ubar-compact .ubar-actions { flex: none; flex-wrap: nowrap; }
+.shell-setup > .ubar { padding-left: max(var(--sp-6), 6vw); padding-right: max(var(--sp-6), 6vw); }
+/* The dot on the Settings entry once an update was put off with "Later". */
+.nav-dot { position: absolute; right: var(--sp-3); top: 50%; width: 0.6rem; height: 0.6rem; margin-top: -0.3rem; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 2px var(--bg); }
+.nav-item.on .nav-dot { background: var(--mint-ink); box-shadow: none; }
 
 /* A problem: one sentence, what to do, the actions. */
 .problem { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-4) var(--sp-5); border-radius: var(--r-lg); background: linear-gradient(0deg, var(--red-soft), var(--red-soft)), rgba(20, 14, 50, 0.85); border: 1px solid rgba(255, 96, 116, 0.5); }
@@ -462,6 +494,26 @@
 .two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
 .wordlist { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .field-note { border: 1px solid rgba(255, 96, 116, 0.55); border-radius: var(--r-md); background: var(--red-soft); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; }
+/* Sub-abilities of the worn piece (Locker, Gear tab) */
+.subs { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-lg); background: rgba(6, 4, 26, 0.35); }
+.subs-off { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
+.subs-title { font-size: var(--fs-md, 1rem); font-weight: 750; margin: 0; }
+.subs-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 14rem)); gap: var(--sp-2); }
+.sub-slot, .sub-opt {
+  display: flex; align-items: center; gap: var(--sp-2); min-height: 3rem; padding: 0.35rem 0.6rem; text-align: left; cursor: pointer;
+  background: rgba(255, 255, 255, 0.04); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--r-md); font-weight: 650; font-size: 0.85rem;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.sub-slot:hover, .sub-opt:hover { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
+.sub-slot-on, .sub-opt-on { color: var(--text); box-shadow: 0 0 0 2px var(--lemon); }
+.sub-slot:focus-visible, .sub-opt:focus-visible { outline: none; box-shadow: var(--focus); }
+.sub-icon { width: 32px; height: 32px; flex: none; }
+.sub-icon-empty { display: block; border: 1px dashed var(--line-strong); border-radius: 50%; }
+.sub-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subs-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); gap: var(--sp-2); }
+.subs-fill { margin: 0 0 var(--sp-3); }
+.opt-hint { margin: 0 0 0 1.7rem; font-weight: 400; }
+@media (max-width: 760px) { .subs-slots { grid-template-columns: 1fr; } }
 
 .vg { position: relative; overflow-y: auto; overflow-x: hidden; background: rgba(6, 4, 26, 0.5); border: 1px solid var(--line); border-radius: var(--r-lg); }
 .vg-fill { height: calc(100vh - 21rem); min-height: 20rem; }

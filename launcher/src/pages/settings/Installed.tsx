@@ -70,7 +70,7 @@ export function Installed() {
   useEffect(() => { void refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void installApi.info().then(setInfo).catch(() => setInfo(null)); }, [status?.root]);
   const ready = status?.ready ?? false;
-  // The wizard's folder holds the configured game root: <dir>\work\splatoon3-11.2.0.
+  // The wizard's folder holds the configured game root: <dir>\work\splatoon3-<version>.
   const dir = info && status?.root && info.state_finished != null && status.root.toLowerCase().startsWith(info.request.install_dir.toLowerCase()) ? info.request.install_dir : null;
   useEffect(() => { if (dir) void installApi.checkDir(dir).then(setDisk).catch(() => setDisk(null)); }, [dir]);
   // The install that holds the configured game root, when it keeps a previous executable (after an update).

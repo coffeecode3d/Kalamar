@@ -7,7 +7,7 @@ others read it directly) and for the people who drive them: what the code does n
 
 ## Map
 
-Kalamar builds a native Windows version of *Splatoon 3* 11.2.0 from the player's own dump, on the player's PC.
+Kalamar builds a native Windows version of *Splatoon 3* 11.3.0 from the player's own dump, on the player's PC.
 
 | Path | What |
 |---|---|

@@ -21,6 +21,19 @@ fn portable_fail(e: portable::Error, log: &Path) -> Fail {
     Fail { log: Some(log.to_path_buf()), ..f }
 }
 
+/// The error of a failed RomFS merge. When the game data fails its own hashes, `s3_merge.py` hashes the two Program
+/// NCAs against their names and says through its exit code which dump is damaged: 41 the base game, 42 the update,
+/// 43 both, 40 neither (then the keys, the disk or the memory are suspects).
+pub(super) fn merge_failure(exit_code: i32) -> &'static str {
+    match exit_code {
+        41 => "base_damaged",
+        42 => "update_damaged",
+        43 => "dumps_damaged",
+        40 => "data_check_failed",
+        _ => "merge_failed",
+    }
+}
+
 impl Run {
     // ---- A: checks --------------------------------------------------------------------------------------------
     pub(super) fn step_checks(&mut self) -> StepResult {
@@ -53,7 +66,7 @@ impl Run {
         }
         let upd = nsp::check_update(Path::new(&self.req.update_nsp));
         if upd.status == "bad" {
-            let mut f = Fail::new("update_bad").with("check", upd.code);
+            let mut f = Fail::new(if upd.code == "update_previous" { "update_previous" } else { "update_bad" }).with("check", upd.code);
             f.params.extend(upd.params.clone());
             return Err(f);
         }
@@ -328,7 +341,7 @@ impl Run {
             let _ = std::fs::remove_file(self.lay.game().join("extraction-manifest.json"));
             return Err(Fail::new("version_mismatch").with("actual", &actual[..16]).with("expected", &expected[..16]));
         }
-        self.log("    update verified: Splatoon 3 11.2.0");
+        self.log(&format!("    update verified: Splatoon 3 {}", gamever::CURRENT.display));
         Ok(if existed { Flow::Skipped } else { Flow::Done })
     }
 
@@ -388,7 +401,7 @@ impl Run {
         }
         let (base, upd) = self.nsp_sizes;
         let copies = if in_place { 0 } else { (base + upd).max(1) };
-        let image = if self.update_known { nsp::ROMFS_SIZE_1120 } else { upd + upd / 3 };
+        let image = if self.update_known { gamever::CURRENT.romfs_size } else { upd + upd / 3 };
         let total = (copies + image) as f64;
         let lay = self.lay.clone();
         let (vpy, root) = (self.venv_py(), self.lay.root.clone());
@@ -415,7 +428,7 @@ impl Run {
             }
             if code != 0 || !lay.romfs_done() {
                 let _ = sys::remove_all(&lay.romfs());
-                return Err(Fail { log: Some(log), exit_code: Some(code), ..Fail::new("merge_failed") });
+                return Err(Fail { log: Some(log), exit_code: Some(code), ..Fail::new(merge_failure(code)) });
             }
             Ok(Flow::Done)
         };
@@ -743,6 +756,15 @@ impl Run {
         if let Some(m) = needs.iter().find(|p| !p.is_file()) {
             return Err(Fail::new("layout_missing").with("path", s(m)));
         }
+        if let Some(old) = self.lay.previous_game() {
+            // An install made for the previous game version: the player's data comes along (a copy: the old game keeps
+            // working and keeps its own until this installation has passed its checks), and the launcher goes on using
+            // the old folder until the cleanup step, after the self-checks.
+            let (files, links) = gamever::carry_user_data(&old, &self.lay.game()).map_err(|e| Fail::io("userdata", e))?;
+            self.log(&format!("    your saves, profile and logs come along from {}: {files} files copied, {links} links left alone; the shader and pipeline caches are not carried (the new game builds its own as you play)", old.display()));
+            self.log(&format!("    the launcher keeps using {} until the new game has passed its checks", old.display()));
+            return Ok(Flow::Done);
+        }
         (self.on_root)(&self.lay.game());
         self.log(&format!("    the launcher now uses {}", self.lay.game().display()));
         Ok(Flow::Done)
@@ -787,7 +809,33 @@ impl Run {
         // A finished update keeps the previous game for "Revert to the previous version" (build-previous).
         self.swapped = false;
         self.xlate_swapped = false;
+        self.finish_upgrade();
         Ok(Flow::Done)
+    }
+}
+
+impl Run {
+    /// The end of an install made over the previous game version, reached only once the new game's self-checks passed
+    /// (this step comes after them, and a failed step ends the run): the launcher switches to the new game folder, and
+    /// the old one (about 14 GB) is deleted without following any link. If it cannot be deleted completely (a file in
+    /// use, a link it must not follow, a folder that is not inside the install folder), what is left is reported as a
+    /// warning and the next update tries again; the new game is installed all the same.
+    fn finish_upgrade(&mut self) {
+        let Some(old) = self.lay.previous_game() else { return };
+        if !self.lay.game_exe().is_file() || !self.state.steps.get(StepId::Selftest.name()).is_some_and(|r| r.status == "done") {
+            return;
+        }
+        (self.on_root)(&self.lay.game());
+        self.log(&format!("    the launcher now uses {}", self.lay.game().display()));
+        let before = sys::dir_size(&old);
+        match gamever::remove_previous_game(&self.lay.root) {
+            Ok(Some(n)) => self.log(&format!("    the previous game folder {} is deleted ({n} entries, about {} MB freed)", old.display(), before / 1_000_000)),
+            Ok(None) => {}
+            Err(e) => {
+                self.log(&format!("    the previous game folder {} could not be deleted completely: {e}", old.display()));
+                self.update(true, |s| s.warnings.push("old_game_left".into()));
+            }
+        }
     }
 }
 
@@ -1141,14 +1189,18 @@ pub struct Existing {
     /// A previous executable is kept (`build-previous`).
     pub previous: bool,
     pub saves: bool,
+    /// The game in `game_root` is the previous game version (`gamever::PREVIOUS`): playable offline, but the game
+    /// update to the current version is needed (it builds a new folder beside it).
+    pub old_version: Option<String>,
 }
 
-/// Looks at the given folders (install folders, or game roots `<install>\work\splatoon3-11.2.0`) for installs.
+/// Looks at the given folders (install folders, or game roots `<install>\work\splatoon3-<version>`) for installs.
 pub fn find_existing(cands: &[PathBuf]) -> Vec<Existing> {
     let mut seen: Vec<PathBuf> = Vec::new();
     let mut out = Vec::new();
     for c in cands {
-        let root = if c.ends_with(Path::new("work").join(GAME_DIR)) { c.parent().and_then(Path::parent).map(Path::to_path_buf) } else { Some(c.clone()) };
+        let is_game_root = [GAME_DIR, gamever::PREVIOUS.game_dir].iter().any(|d| c.ends_with(Path::new("work").join(d)));
+        let root = if is_game_root { c.parent().and_then(Path::parent).map(Path::to_path_buf) } else { Some(c.clone()) };
         let Some(root) = root else { continue };
         let key = PathBuf::from(root.display().to_string().to_ascii_lowercase());
         if seen.contains(&key) {
@@ -1163,6 +1215,27 @@ pub fn find_existing(cands: &[PathBuf]) -> Vec<Existing> {
             _ => continue,
         };
         if !lay.game().is_dir() {
+            // An install made for the previous game version: its game is offered the update (and stays playable).
+            if let Some(old) = lay.previous_game() {
+                out.push(Existing {
+                    dir: root.display().to_string(),
+                    kind,
+                    game_root: old.display().to_string(),
+                    exe: old.join("build").join(exe_name(GAME_STEM)).is_file(),
+                    exefs: false,
+                    romfs: false,
+                    lift: false,
+                    objects: false,
+                    xlate: lay.xlate_exe().is_file(),
+                    venv: lay.venv_py().is_file(),
+                    source: installed_source(&lay),
+                    launcher_data: Some(root.join("launcher-data")).filter(|p| p.is_dir()).map(|p| p.display().to_string()),
+                    needs_files: true,
+                    previous: false,
+                    saves: crate::install::save_dir(&old).is_dir(),
+                    old_version: Some(gamever::PREVIOUS.display.to_string()),
+                });
+            }
             continue;
         }
         let source = bundle::load_marker(&lay.src()).or_else(|| {
@@ -1184,6 +1257,7 @@ pub fn find_existing(cands: &[PathBuf]) -> Vec<Existing> {
             needs_files: needs_player_files(&lay),
             previous: previous_dir(&lay).join(exe_name(GAME_STEM)).is_file(),
             saves: crate::install::save_dir(&lay.game()).is_dir(),
+            old_version: None,
         });
     }
     out
@@ -1215,7 +1289,7 @@ pub fn default_candidates(config_root: Option<&Path>) -> Vec<PathBuf> {
     let profile = crate::config::user_profile();
     for start in [std::env::current_exe().ok(), std::env::current_dir().ok()].into_iter().flatten() {
         for dir in crate::config::ancestors_in_profile(&start, profile.as_deref()).into_iter().take(6) {
-            if dir.join("work").join(GAME_DIR).is_dir() {
+            if dir.join("work").join(GAME_DIR).is_dir() || gamever::previous_game(&dir).is_some() {
                 c.push(dir);
             }
         }
@@ -1271,6 +1345,10 @@ pub struct Plan {
     pub disk_peak_step: Option<StepId>,
     /// What the install folder holds at the end.
     pub footprint: u64,
+    /// The install holds the previous game version: this run builds the current one beside it, keeps the player's data
+    /// and deletes the old folder at the end (`gamever`). `previous_bytes`: what that folder holds.
+    pub previous_game: Option<String>,
+    pub previous_bytes: u64,
     pub ram: Option<u64>,
     pub cpus: usize,
     pub jobs: u32,
@@ -1306,7 +1384,7 @@ pub fn folder_kind(root: &Path) -> (&'static str, bool) {
     }
     // The pre-release installer's layout: its own copy of the runtime source next to the game folder (never a developer's workspace,
     // which has no `src\recomp` there).
-    if root.join("src").join("recomp").join("gen.py").is_file() && (root.join("work").join(GAME_DIR).is_dir() || root.join("Jouer.cmd").is_file()) {
+    if root.join("src").join("recomp").join("gen.py").is_file() && (root.join("work").join(GAME_DIR).is_dir() || gamever::previous_game(root).is_some() || root.join("Jouer.cmd").is_file()) {
         return ("kit", false);
     }
     let empty = std::fs::read_dir(root).map(|mut r| r.next().is_none()).unwrap_or(false);
@@ -1392,6 +1470,14 @@ pub struct UpdateCheck {
     pub eta_max: f64,
     /// The player chose to run it when the launcher closes (set by the launcher, not by the check).
     pub at_close: bool,
+    /// The installed game is the previous version (`gamever::PREVIOUS`, named here): the game update to
+    /// `gamever::CURRENT` is needed, it asks for the update file, builds a new folder and then deletes the old one.
+    /// `update` is `None` then; `eta` is a first install's estimate and `disk_need` the free space it asks for.
+    pub game_from: Option<String>,
+    pub game_to: String,
+    pub disk_need: u64,
+    /// What the old folder holds (freed at the end).
+    pub old_bytes: u64,
 }
 
 /// Whether the game installed in `install_dir` (a finished install of the wizard or of the pre-release installer, with its executable)
@@ -1399,6 +1485,28 @@ pub struct UpdateCheck {
 pub fn update_check(install_dir: &Path, bundle_dir: &Path) -> Option<UpdateCheck> {
     let lay = Layout::new(install_dir);
     let (kind, _) = folder_kind(install_dir);
+    if matches!(kind, "wizard" | "kit")
+        && !lay.game_exe().is_file()
+        && let Some(old) = lay.previous_game().filter(|o| o.join("build").join(exe_name(GAME_STEM)).is_file())
+    {
+        let manifest = bundle::load_manifest(bundle_dir)?;
+        let (disk_need, _, eta, _) = fresh_estimate(default_jobs());
+        return Some(UpdateCheck {
+            install_dir: install_dir.display().to_string(),
+            available: true,
+            installed_source: installed_source(&lay),
+            bundled_commit: manifest.commit,
+            redo: StepId::ALL.iter().copied().filter(|s| !s.always_runs() && s.source_bound()).collect(),
+            update: None,
+            eta,
+            eta_max: eta,
+            at_close: false,
+            game_from: Some(gamever::PREVIOUS.display.to_string()),
+            game_to: gamever::CURRENT.display.to_string(),
+            disk_need,
+            old_bytes: sys::dir_size(&old),
+        });
+    }
     if !matches!(kind, "wizard" | "kit") || !lay.game_exe().is_file() || needs_player_files(&lay) {
         return None;
     }
@@ -1422,6 +1530,10 @@ pub fn update_check(install_dir: &Path, bundle_dir: &Path) -> Option<UpdateCheck
         eta,
         eta_max,
         at_close: false,
+        game_from: None,
+        game_to: gamever::CURRENT.display.to_string(),
+        disk_need: 0,
+        old_bytes: 0,
     })
 }
 
@@ -1491,6 +1603,7 @@ pub fn plan(req: &InstallRequest, bundle_dir: Option<&Path>) -> Plan {
     let download_bytes = downloads.iter().filter(|d| d.needed).map(|d| d.bytes).sum();
     let (kind, foreign) = folder_kind(&lay.root);
     let existing = kind == "wizard" || kind == "kit";
+    let previous_bytes = lay.previous_game().map_or(0, |p| sys::dir_size(&p));
     let uses = run.space_steps(StepId::Prereqs);
     let disk_needed = space::needs(&uses).first().map_or(space::MARGIN, |n| n.1);
     let disk_peak_step = space::peak_step(&uses);
@@ -1513,7 +1626,10 @@ pub fn plan(req: &InstallRequest, bundle_dir: Option<&Path>) -> Plan {
         disk_free: sys::free_bytes(&lay.root),
         disk_needed,
         disk_peak_step,
-        footprint: sys::dir_size(&lay.root) + space::added(&uses),
+        // At the end: the old game folder, if any, is gone.
+        footprint: (sys::dir_size(&lay.root) + space::added(&uses)).saturating_sub(previous_bytes),
+        previous_game: lay.previous_game().map(|_| gamever::PREVIOUS.display.to_string()),
+        previous_bytes,
         ram: sys::total_ram(),
         cpus: sys::cpus(),
         jobs,
@@ -1550,38 +1666,36 @@ pub fn uninstall(root: &Path, remove_saves: bool) -> Result<UninstallReport, Str
         return Err("not_wizard_install".into());
     }
     let g = lay.game();
-    let mut targets = vec![
-        lay.src(),
-        lay.root.join("src.new"),
-        lay.tools(),
-        lay.venv(),
-        lay.nuget(),
-        lay.xlate(),
-        lay.exefs(),
-        lay.romfs(),
-        lay.lift(),
-        previous_dir(&lay),
-        previous_new(&lay),
-    ];
-    targets.extend(lay.merge_temps());
-    targets.push(g.join("extraction-manifest.json"));
-    targets.push(g.join("merge_romfs.log"));
+    let mut targets = vec![lay.src(), lay.root.join("src.new"), lay.tools(), lay.venv(), lay.nuget(), lay.xlate(), previous_dir(&lay), previous_new(&lay)];
     let mut kept = Vec::new();
-    // build\: everything but the runtime's settings file (kept with the saves).
-    if let Ok(rd) = std::fs::read_dir(lay.build()) {
-        for e in rd.flatten() {
-            let n = e.file_name().to_string_lossy().to_ascii_lowercase();
-            if !remove_saves && (n == "kalamar.ini" || n == "totk.ini") {
-                kept.push(e.path().display().to_string());
-            } else {
-                targets.push(e.path());
+    // The game folder of this version and, when the install was never updated, the one of the previous version: what
+    // the wizard made in them goes, the player's data stays unless the separate box is ticked.
+    let mut games = vec![g.clone()];
+    games.extend(lay.previous_game());
+    for game in &games {
+        let (build, userdata) = (game.join("build"), game.join("userdata"));
+        targets.extend([game.join("exefs"), game.join("romfs"), game.join("lift")]);
+        if let Ok(rd) = std::fs::read_dir(game) {
+            targets.extend(rd.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("update-merge-"))));
+        }
+        targets.push(game.join("extraction-manifest.json"));
+        targets.push(game.join("merge_romfs.log"));
+        // build\: everything but the runtime's settings file (kept with the saves).
+        if let Ok(rd) = std::fs::read_dir(&build) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().to_ascii_lowercase();
+                if !remove_saves && (n == "kalamar.ini" || n == "totk.ini") {
+                    kept.push(e.path().display().to_string());
+                } else {
+                    targets.push(e.path());
+                }
             }
         }
-    }
-    if remove_saves {
-        targets.push(lay.userdata());
-    } else if lay.userdata().exists() {
-        kept.push(lay.userdata().display().to_string());
+        if remove_saves {
+            targets.push(userdata);
+        } else if userdata.exists() {
+            kept.push(userdata.display().to_string());
+        }
     }
     targets.push(lay.logs());
     targets.push(lay.state());
@@ -1597,7 +1711,9 @@ pub fn uninstall(root: &Path, remove_saves: bool) -> Result<UninstallReport, Str
         removed.push(t.display().to_string());
     }
     // Folders left empty.
-    for d in [lay.build(), g.clone(), lay.work(), lay.root.clone()] {
+    let mut empty: Vec<PathBuf> = games.iter().flat_map(|game| [game.join("build"), game.clone()]).collect();
+    empty.extend([lay.work(), lay.root.clone()]);
+    for d in empty {
         if std::fs::read_dir(&d).map(|mut r| r.next().is_none()).unwrap_or(false) {
             let _ = std::fs::remove_dir(&d);
         }
@@ -1665,6 +1781,16 @@ mod tests {
         uninstall(&root, true).unwrap();
         assert!(!lay.userdata().exists() && !lay.build().exists());
         assert!(root.join("Jouer.cmd").is_file());
+        sys::remove_all(&root).unwrap();
+    }
+
+    #[test]
+    fn uninstalling_an_install_not_yet_updated_removes_the_old_game_too_but_not_its_data() {
+        let (root, lay, old) = old_install("uninst");
+        let r = uninstall(&root, false).unwrap();
+        assert!(!old.join("exefs").exists() && !old.join("romfs").exists() && !old.join("build").join(exe_name(GAME_STEM)).exists() && !lay.state().exists());
+        assert!(old.join("userdata").join("profile").join("save").join("save.dat").is_file() && old.join("build").join("kalamar.ini").is_file());
+        assert!(r.kept.iter().any(|k| k.contains(gamever::PREVIOUS.game_dir)), "{:?}", r.kept);
         sys::remove_all(&root).unwrap();
     }
 
@@ -1851,11 +1977,11 @@ mod tests {
         }
         portable_tools_ready(&root);
         touch(&lay.lift().join("layout.json"));
-        std::fs::write(lay.lift().join("target.json"), r#"{"target":"splatoon3-v1120","modules":["main"]}"#).unwrap();
+        std::fs::write(lay.lift().join("target.json"), format!(r#"{{"target":"{TARGET}","modules":["main"]}}"#)).unwrap();
         touch(&lay.lift().join("main").join("manifest.json"));
         let req = InstallRequest { install_dir: root.display().to_string(), jobs: 4, ..Default::default() };
         let run = dry_run(&req, Some(&b0));
-        let mut st = StateFile { finished: true, lift_inputs: run.lift_hash.clone(), compile_inputs: run.compile_hash(), keys_inputs: run.keys_hash.clone(), xlate_inputs: run.xlate_hash.clone(), ..Default::default() };
+        let mut st = StateFile { target: TARGET.into(), finished: true, lift_inputs: run.lift_hash.clone(), compile_inputs: run.compile_hash(), keys_inputs: run.keys_hash.clone(), xlate_inputs: run.xlate_hash.clone(), ..Default::default() };
         st.steps.insert("compile".into(), StepRecord { status: "done".into(), commit: "c0".into(), ..Default::default() });
         st.save(&lay.state()).unwrap();
         (root, lay, req)
@@ -1986,6 +2112,121 @@ mod tests {
         sys::remove_all(&root).unwrap();
     }
 
+    // ---- an install made for the previous game version ----------------------------------------------------------
+
+    /// A finished install of the previous game version: its game folder holds the executable, the extracted ExeFS and
+    /// merged RomFS, a save, and the state file an older launcher wrote (no target recorded).
+    fn old_install(tag: &str) -> (PathBuf, Layout, PathBuf) {
+        let (root, lay, _) = built_install(tag);
+        let old = root.join("work").join(gamever::PREVIOUS.game_dir);
+        std::fs::rename(lay.game(), &old).unwrap();
+        std::fs::create_dir_all(old.join("userdata")).unwrap();
+        std::fs::write(old.join("userdata").join("big.bin"), vec![1u8; 4096]).unwrap();
+        touch(&old.join("userdata").join("profile").join("save").join("save.dat"));
+        touch(&old.join("userdata-p2").join("profile").join("save").join("save.dat"));
+        touch(&old.join("build").join("kalamar.ini"));
+        let mut st = StateFile::load(&lay.state()).unwrap();
+        st.target.clear();
+        st.save(&lay.state()).unwrap();
+        (root, lay, old)
+    }
+
+    fn run_for(root: &Path, on_root: OnRoot) -> Run {
+        Run::new(Installer::default(), InstallRequest { install_dir: root.display().to_string(), ..Default::default() }, None, Arc::new(|_| {}), on_root)
+    }
+
+    #[test]
+    fn an_install_of_the_previous_game_version_is_recognised_and_offered_the_update() {
+        let (root, lay, old) = old_install("oldver");
+        assert!(!lay.game().exists() && lay.previous_game() == Some(old.clone()));
+        // found at start: playable (offline), the update needs the player's files for the new version
+        let found = find_existing(std::slice::from_ref(&root));
+        assert_eq!(found.len(), 1);
+        let e = &found[0];
+        assert_eq!((e.old_version.as_deref(), e.exe, e.needs_files, e.saves), (Some(gamever::PREVIOUS.display), true, true, true));
+        assert_eq!(e.game_root, old.display().to_string());
+        // also when it is given as the game folder
+        assert_eq!(find_existing(std::slice::from_ref(&old)).len(), 1);
+        // the Play page: a game update is needed, not a recompilation
+        let b = make_bundle(&root.join("b"), &BASE, "c0");
+        let c = update_check(&root, &b).unwrap();
+        assert_eq!((c.available, c.game_from.as_deref(), c.game_to.as_str(), c.update.is_none()), (true, Some(gamever::PREVIOUS.display), gamever::CURRENT.display, true));
+        assert!(c.old_bytes >= 4096 && c.disk_need > 0 && c.eta > 0.0, "{c:?}");
+        // an unfinished upgrade is still "a game update is needed" until the new game is there
+        let mut st = StateFile::load(&lay.state()).unwrap();
+        st.finished = false;
+        st.save(&lay.state()).unwrap();
+        assert_eq!(update_check(&root, &b).unwrap().game_from.as_deref(), Some(gamever::PREVIOUS.display));
+        // the plan: the game's steps are all to do, the tools are kept, the old folder is named
+        let p = plan(&InstallRequest { install_dir: root.display().to_string(), ..Default::default() }, Some(&b));
+        assert_eq!((p.previous_game.as_deref(), p.needs_files, p.existing), (Some(gamever::PREVIOUS.display), true, true));
+        assert!(p.previous_bytes >= 4096);
+        let done = |id: StepId| p.steps.iter().find(|s| s.id == id).unwrap().done;
+        assert!(!done(StepId::Exefs) && !done(StepId::Romfs) && !done(StepId::Compile) && !done(StepId::Keys), "{:?}", p.steps);
+        assert!(done(StepId::Python) && done(StepId::Xlate), "the tools and the translator are reused: {:?}", p.steps);
+        // once the new game is built the notice is gone
+        touch(&lay.game_exe());
+        touch(&lay.exefs().join("main"));
+        touch(&lay.romfs().join("romfs.bin"));
+        touch(&lay.romfs().join("index.json"));
+        st.finished = true;
+        st.target = TARGET.into();
+        st.save(&lay.state()).unwrap();
+        assert!(update_check(&root, &b).unwrap().game_from.is_none());
+        sys::remove_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_new_game_takes_the_old_ones_data_and_the_old_folder_goes_only_after_the_checks() {
+        let (root, lay, old) = old_install("upgrade");
+        let called: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+        let c2 = called.clone();
+        let mut run = run_for(&root, Arc::new(move |p| c2.lock().unwrap().push(p.to_path_buf())));
+        // the state of the older launcher is forgotten for the game's steps (the save keys would otherwise be kept)
+        assert_eq!(run.state.target, TARGET);
+        assert!(!run.state.steps.contains_key("compile") && run.state.keys_inputs.is_empty() && run.state.lift_inputs.is_empty());
+        // the layout step: data copied, the launcher not switched yet, the old game intact
+        for p in [lay.game_exe(), lay.xlate_exe(), lay.romfs().join("romfs.bin"), lay.romfs().join("index.json")] {
+            touch(&p);
+        }
+        run.step_layout().unwrap();
+        assert!(lay.userdata().join("profile").join("save").join("save.dat").is_file());
+        assert!(lay.game().join("userdata-p2").join("profile").join("save").join("save.dat").is_file());
+        assert!(called.lock().unwrap().is_empty(), "the launcher keeps the old game until the checks passed");
+        assert!(old.join("userdata").join("profile").join("save").join("save.dat").is_file() && old.join("build").join(exe_name(GAME_STEM)).is_file());
+        // the cleanup step before the self-checks passed (or after a failed one): nothing is switched or deleted
+        run.finish_upgrade();
+        assert!(old.is_dir() && called.lock().unwrap().is_empty());
+        // after them: switched, then the old folder is deleted
+        run.state.steps.insert(StepId::Selftest.name().into(), StepRecord { status: "done".into(), ..Default::default() });
+        run.finish_upgrade();
+        assert_eq!(*called.lock().unwrap(), [lay.game()]);
+        assert!(!old.exists());
+        assert!(lay.userdata().join("profile").join("save").join("save.dat").is_file() && lay.game_exe().is_file());
+        // never removed while the new game is not there
+        let (root2, lay2, old2) = old_install("nonew");
+        let mut run2 = run_for(&root2, Arc::new(|_| {}));
+        run2.state.steps.insert(StepId::Selftest.name().into(), StepRecord { status: "done".into(), ..Default::default() });
+        run2.finish_upgrade();
+        assert!(old2.is_dir() && !lay2.game().exists());
+        sys::remove_all(&root).unwrap();
+        sys::remove_all(&root2).unwrap();
+    }
+
+    #[test]
+    fn a_failed_copy_of_the_data_stops_the_install_before_anything_is_switched() {
+        let (root, lay, old) = old_install("copyfail");
+        let mut run = run_for(&root, Arc::new(|_| panic!("switched")));
+        for p in [lay.game_exe(), lay.xlate_exe(), lay.romfs().join("romfs.bin"), lay.romfs().join("index.json")] {
+            touch(&p);
+        }
+        // a FILE where the new game needs the folder `userdata`
+        touch(&lay.game().join("userdata"));
+        assert!(run.step_layout().is_err());
+        assert!(old.join("userdata").join("profile").join("save").join("save.dat").is_file());
+        sys::remove_all(&root).unwrap();
+    }
+
     #[test]
     fn plan_lists_every_download_source() {
         let root = std::env::temp_dir().join(format!("s3l-plan-{}", crate::util::random_hex(4)));
@@ -2057,5 +2298,21 @@ mod tests {
         assert!(dry_run(&req, Some(&b1)).is_done(StepId::Sources, "c0"));
         assert!(!dry_run(&req, Some(&b2)).is_done(StepId::Sources, "c0"), "same commit, other kit-tools");
         sys::remove_all(&root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod merge_failure_tests {
+    use super::merge_failure;
+
+    #[test]
+    fn a_damaged_dump_is_named_and_anything_else_stays_a_merge_failure() {
+        assert_eq!(merge_failure(41), "base_damaged");
+        assert_eq!(merge_failure(42), "update_damaged");
+        assert_eq!(merge_failure(43), "dumps_damaged");
+        assert_eq!(merge_failure(40), "data_check_failed");
+        for other in [1, 2, 3, -1, 39, 44, 0] {
+            assert_eq!(merge_failure(other), "merge_failed");
+        }
     }
 }

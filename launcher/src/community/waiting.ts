@@ -70,7 +70,11 @@ export function slowPlayers(seen: SeenLaunched, participants: J[] | null | undef
 }
 
 /** The installed game's check, as `proto_game_check` answers. */
-export interface GameCheck { level: "ok" | "too_old" | "unknown" | "missing"; outdated: boolean; installed_commit: string | null; bundled_commit: string | null; note: string | null }
+export interface GameCheck {
+  level: "ok" | "too_old" | "unknown" | "missing"; outdated: boolean; installed_commit: string | null; bundled_commit: string | null; note: string | null;
+  /** The installed game is for this other game version (`level` is then `too_old`): the game update to `needed_version` is needed. */
+  old_version: string | null; needed_version: string;
+}
 
 /** The game cannot take part in an automatic match: the player may not declare ready, start or accept. */
 export function gameBlocks(check: GameCheck | null | undefined): boolean {

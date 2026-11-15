@@ -27,14 +27,22 @@ int save_profile_gear_dropped(int part, int64_t id);
 // The appearance fields (style, hair, eyebrows, legwear, skin, eyes) that a profile given as JSON text lacks, comma
 // separated in names: how many, -1 when json is not an object. A new save needs all of them.
 int save_profile_missing_appearance(const char *json, char *names, size_t cap);
+// A profile's gear_abilities (JSON text) checked against an ability enum string in the form main holds it
+// ("None = -1 , <name> = 0 , ..."): the parts given as a bit mask (1 head, 2 clothes, 4 shoes) with their three sub
+// abilities in sub (enum values, -1 empty), or -1 and why when it is refused.
+int save_profile_gear_abilities_check(const char *json, const char *enum_s, int64_t sub[3][3], char *why, size_t cap);
+// The value of the entry at position pos of main's ability enum (0: its first entry, the empty value -1), as the save
+// stores an ability; -2 when main has no such entry (auto_match.c: the match record numbers abilities by position).
+int64_t save_profile_ability_at(int pos);
 // Keeps the newest `keep` yyyymmdd-hhmmss folders of dir (a folder named save-profile-backup), deleting the older
 // ones by that name pattern, never following a link; keep 0 keeps all. Returns the number deleted.
 int save_profile_prune_backups(const char *dir, int keep);
 // --probe-profile (save_profile_probe.c): no game files.
 int probe_profile(void);
 
-// A RomFS table, RSDB/<name>.Product.b20.rstbl.byml.zs (an array of rows of scalars), read from the RomFS image: NULL
-// when it is missing or not such a table. A field's value, or def / "" / 0 when the row has no such field of that type.
+// A RomFS table, RSDB/<name>.Product.<tag>.rstbl.byml.zs (the build's tag: splat3_addr.h; an array of rows of
+// scalars), read from the RomFS image: NULL when it is missing or not such a table. A field's value, or def / "" / 0
+// when the row has no such field of that type.
 typedef struct RsdbTable RsdbTable;
 RsdbTable *rsdb_open(const char *name);
 uint32_t rsdb_rows(const RsdbTable *t);

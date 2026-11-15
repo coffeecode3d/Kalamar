@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Splatoon 3 (11.2.0) save.dat tool: decrypt, dump, edit and re-encrypt the game's save, and apply a launcher profile.
+"""Splatoon 3 save.dat tool (11.2.0 and 11.3.0): decrypt, dump, edit and re-encrypt the game's save, and apply a launcher profile.
 
 The format was measured with the runtime's save trace (TOTK_SAVE_TRACE, runtime/savetrace.c): the game encrypts the
 save with the nn::crypto AES-256 functions it imports, and the trace logged their keys, counters and buffers.
@@ -10,6 +10,8 @@ save with the nn::crypto AES-256 functions it imports, and the trace logged thei
              (32 key bytes, then 16 counter bytes, big-endian counter); T is a 32-entry u32 table in the game's main
   check    = MurmurHash3_x86_32(body, seed) + the first output of that second generator (mod 2^32)
   plaintext = "MS" 00 04 | game version u32be (0x000B0200 = 11.2.0) | MessagePack map (game) | MessagePack map (player)
+             (the version word is only shown, as major.minor.patch, by `check` and `dump`: no command reads it to decide
+             anything or writes it, so a save made by an earlier game version is edited and written back with its own)
   map keys = MurmurHash3_x86_32(field name, seed 0), written as uint32
 
 The table T is never stored in this tool: `s3save.py keys --exefs <dir>` reads it from the user's own main (and the
@@ -342,7 +344,7 @@ def mp_write(node, out):
 
 
 class Plain:
-    """A decrypted save: the 8-byte inner header and the MessagePack roots after it (two in 11.2.0)."""
+    """A decrypted save: the 8-byte inner header and the MessagePack roots after it (two in 11.2.0 and 11.3.0)."""
 
     def __init__(self, plain):
         if plain[:4] != PLAIN_MAGIC:
@@ -559,12 +561,26 @@ def romfs_reader(root):
             with open(os.path.join(root, 'romfs.bin'), 'rb') as fh:
                 fh.seek(f['offset'])
                 return fh.read(f['size'])
+        get.paths = list(idx)
         return get
-    return lambda p: open(os.path.join(root, p), 'rb').read()
+
+    def get(p):
+        return open(os.path.join(root, p), 'rb').read()
+    rsdb_dir = os.path.join(root, 'RSDB')
+    get.paths = ['RSDB/' + n for n in os.listdir(rsdb_dir)] if os.path.isdir(rsdb_dir) else []
+    return get
 
 
 def rsdb(get, name):
-    return byml_parse(zstd_decompress(get('RSDB/%s.Product.b20.rstbl.byml.zs' % name)))
+    """One RSDB table by name. The build's name tag in the file name (`b20` in 11.2.0, `b30` in 11.3.0) is not assumed:
+    it is whatever the RomFS holds, and a RomFS that holds two of the same table is refused."""
+    prefix, suffix = 'RSDB/%s.Product.' % name, '.rstbl.byml.zs'
+    hits = sorted(p for p in get.paths if p.startswith(prefix) and p.endswith(suffix) and '.' not in p[len(prefix):-len(suffix)])
+    if not hits:
+        raise SaveError('the RomFS has no table %s%s%s (another game version?)' % (prefix, '<tag>', suffix))
+    if len(hits) > 1:
+        raise SaveError('the RomFS has several tables for %s: %s' % (name, ', '.join(hits)))
+    return byml_parse(zstd_decompress(get(hits[0])))
 
 
 def read_tables(romfs, abilities):
@@ -1108,7 +1124,7 @@ def cmd_catalogue(a):
     sel = lambda rows: [r for r in rows if r.get('Order', 0) >= 0 and 'Sdodr' not in r.get('__RowId', '')]
     order = lambda rows: sorted(rows, key=lambda r: (r.get('Order', 0), r['Id']))
     doc = {
-        'what': 'Splatoon 3 11.2.0 character-creation options (RomFS RSDB tables, read from the player\'s own game); '
+        'what': 'Splatoon 3 character-creation options (RomFS RSDB tables, read from the player\'s own game); '
                 'ids as profile.json takes them',
         'styles': [{'id': v, 'key': k, 'species': k.split('_')[0], 'body': k.split('_')[1].upper(),
                     'model_type_name': ['SquidF', 'SquidM', 'OctopusF', 'OctopusM'][v]} for k, v in STYLES.items()],

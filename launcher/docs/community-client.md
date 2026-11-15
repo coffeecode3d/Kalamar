@@ -106,8 +106,21 @@ the server's data as given, so a server can invent its own tournaments, leagues,
   status file's error code when the engine wrote no result), retrying on network errors; a match canceled before the
   stage closes the game. The next game of a series waits for the previous game to close (it closes by itself after its
   result) rather than failing.
+- **A game opened for solo play is closed for the match.** A match needs a fresh game with its own environment, so a
+  game the player started from the launcher for any other mode (Full game, Training, Free roam, LAN) cannot play it.
+  Just before the launch (after the loadout choice), when such a game of the first player is running (or restarted
+  into its second process), the runner goes to phase `closing` ("Closing the game you had open..."), asks the game to
+  close like its window's close button (`WM_CLOSE`, `winutil::request_close`), waits 6 seconds for it to end by itself,
+  then terminates it (only the process the launcher started and the one it restarted into; `launch::close_open_game`)
+  and waits 3 more seconds. The match then starts within its launch deadline. The launcher's own match in progress
+  is never closed (it keeps its wait and the refusal of a second game). When the game cannot be closed, the match
+  stops in phase `failed` with the code `game-not-closed`, the page shows its own sentence, and the server gets
+  `launcher-failed` with the reason, like any failed launch. Until then the page warns the player: a notice on the
+  search ticket (searching, match found) and in a room that is open says that the open game will be closed when the
+  match starts and that what is not saved in it is lost. The second player's game is not touched, and neither is a
+  game this launcher did not start.
 - **Engine capabilities and contract 2.** `PUT /v1/me/game` is sent after each login and each new stream. Its `build`
-  is `kalamar/<launcher version> runtime/<engine snapshot, 12 digits> game/11.2.0`, the same for every player of the
+  is `kalamar/<launcher version> runtime/<engine snapshot, 12 digits> game/11.3.0`, the same for every player of the
   same build (`proto::engine::build_label`). Its content comes from the engine itself: `splat3.exe --list-match-options` (the engine's JSON list, no window, no game started)
   runs once per executable (size and date), only when a server needs it, never at start-up, and is cached in
   `<data>\engine\match-options.json`. The list is relayed verbatim (`options`), with `contracts` (1 and 2 when the
@@ -143,7 +156,9 @@ the server's data as given, so a server can invent its own tournaments, leagues,
   match card lists the allowed items, or the Locker catalog's items minus the denied ones, until shortly before the
   launch deadline), else the Locker's current item when it complies, else the first allowed one. The ids go to the
   engine as a save profile (`KLM_MATCH_LOADOUT`), the launch report says what was applied, the result's
-  `loadout.ok` is shown. During a match, the Locker's profile (`KLM_SAVE_PROFILE`) also reaches only the copy.
+  `loadout.ok` is shown. During a match, the Locker's profile (`KLM_SAVE_PROFILE`) also reaches only the copy. For
+  each gear part the file names, it also carries the player's sub-abilities of the Locker (`gear_abilities`, three
+  names or `null`s) when the player chose some; what is reported to the server stays ids only.
   An engine that reports `stage_list: "all"` offers every listed stage whatever the save: the whole list is declared.
   The reference server imposes no loadout; `proto_peer --loadout-rules` hands constraints to the runner to try it.
 - **Several relays and a changing offer (1.1.9).** `meta.changed` makes the backend read the meta again (after a

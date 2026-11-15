@@ -66,7 +66,7 @@ test("a player stuck at launched while the host waits gets a help message after 
 });
 
 test("the check blocks only a game proven too old, and warns for a recompilation", () => {
-  const c = (level, outdated) => ({ level, outdated, installed_commit: null, bundled_commit: null, note: null });
+  const c = (level, outdated) => ({ level, outdated, installed_commit: null, bundled_commit: null, note: null, old_version: null, needed_version: "11.3.0" });
   assert.equal(gameBlocks(c("too_old", true)), true);
   assert.equal(gameBlocks(c("unknown", false)), false);
   assert.equal(gameBlocks(c("ok", true)), false);

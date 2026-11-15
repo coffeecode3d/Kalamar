@@ -617,6 +617,8 @@ export const community: CommunityDict = {
   "inc.launcher.spectate": "les places de spectateur (lanceur à mettre à jour)",
   "m.runner.late": "Le match avait déjà commencé : votre jeu n'a pas été lancé (le jeu ne fait plus entrer de spectateur).",
   "m.runner.confirm": "Le lanceur attend votre accord pour lancer le jeu",
+  "m.runner.closing": "Fermeture du jeu que vous aviez ouvert…",
+  "m.open_game": "Le jeu que vous avez ouvert sera fermé au début du match. Ce que vous n'y avez pas sauvegardé est perdu.",
   "m.ask.title": "Lancer le jeu pour ce match ?",
   "m.ask.not_joined": "Ce serveur veut lancer votre jeu pour un match que vous n'avez pas rejoint depuis ce lanceur (ou le lanceur a redémarré depuis).",
   "m.ask.too_many": "Ce serveur a lancé votre jeu de nombreuses fois en peu de temps. Le lancer encore une fois ?",
@@ -645,4 +647,7 @@ export const community: CommunityDict = {
   "err.erase_name": "Le nom tapé n'est pas votre nom.",
   "err.export_write": "Le fichier n'a pas pu être écrit ({message}).",
   "err.bad_answer": "La réponse du serveur est inutilisable ({message}).",
+  "m.ver.title": "Votre jeu est en version {from} : mettez-le à jour vers la {to}",
+  "m.ver.body": "Le jeu en ligne demande Splatoon 3 {to}, et ce jeu est en {from}. Mettez le jeu à jour, puis revenez ici.",
+  "m.ver.btn": "Mettre le jeu à jour",
 };

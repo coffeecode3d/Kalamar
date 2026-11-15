@@ -24,7 +24,7 @@ trust it. (`runner.rs`, `commands.rs` `match_start`)
 once per match and once per 20 seconds, and never while a game is running. (`proto/glue.rs` `FrontOnce`)
 
 **Servers learn your game build, not your computer.** The launcher tells a server which launcher, runtime and game
-versions you have (`kalamar/<version> runtime/<engine snapshot> game/11.2.0`), the same text for everyone with the same build; nothing
+versions you have (`kalamar/<version> runtime/<engine snapshot> game/11.3.0`), the same text for everyone with the same build; nothing
 in it tells your installation apart. (`proto/engine.rs` `build_label`)
 
 **Names cannot be disguised.** Server names, player names and the other text a server sends lose the invisible

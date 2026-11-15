@@ -3,11 +3,14 @@ import { useMemo, useState } from "react";
 import type { GameEntry } from "../../api";
 import { GameIcon, VirtualGrid } from "../../grid";
 import { entryName, namedName, normalise, rarityStars } from "../../gamedata";
+import { useApp } from "../../ctx";
+import { SubAbilities } from "./SubAbilities";
 import { FieldNote, FilterBar, Segmented, SearchBox, Select, sortEntries, type TabProps } from "./common";
 
 type Slot = "head" | "clothes" | "shoes";
 
-export function Gear({ cat, profile, setProfile, lang, t, notes, advanced }: TabProps) {
+export function Gear({ cat, profile, setProfile, lang, t, notes, advanced, subs }: TabProps) {
+  const { go } = useApp();
   const [slot, setSlot] = useState<Slot>("head");
   const [q, setQ] = useState("");
   const [brand, setBrand] = useState("");
@@ -46,7 +49,7 @@ export function Gear({ cat, profile, setProfile, lang, t, notes, advanced }: Tab
 
   return (
     <div className="tab-body">
-      {(["head", "clothes", "shoes", "gear"] as const).map((k) => <FieldNote key={k} note={notes[k]} t={t} />)}
+      {(["head", "clothes", "shoes", "gear", "sub_abilities", `sub_abilities.${slot}`] as const).map((k) => <FieldNote key={k} note={notes[k]} t={t} />)}
       <FilterBar>
         <Segmented<Slot> value={slot} onChange={(v) => { setSlot(v); setBrand(""); setAbility(""); }} label={t("profile.tab.gear")}
           options={[{ id: "head", label: t("profile.gear.head") }, { id: "clothes", label: t("profile.gear.clothes") }, { id: "shoes", label: t("profile.gear.shoes") }]} />
@@ -69,6 +72,9 @@ export function Gear({ cat, profile, setProfile, lang, t, notes, advanced }: Tab
           {chosenEntry ? <>{t("profile.selected")} <strong>{nameOf(chosenEntry)}</strong> <button className="btn btn-small btn-ghost" onClick={() => setProfile((p) => ({ ...p, [slot]: null }))}>{t("profile.clear")}</button></> : t("profile.noselection")}
         </span>
       </div>
+      {chosenEntry && (
+        <SubAbilities part={slot} partLabel={t(`profile.gear.${slot}` as "profile.gear.head")} pieceName={nameOf(chosenEntry)} cat={cat} profile={profile} setProfile={setProfile} lang={lang} t={t} info={subs ?? null} onUpdate={() => go("play")} />
+      )}
       <VirtualGrid
         className="vg-fill"
         items={items}

@@ -25,6 +25,34 @@ int probe_profile(void) {
                                           "\"eyes\":1}", n, sizeof n) == 1 && !strcmp(n, "hair"), "null counts as absent");
     CHECK(save_profile_missing_appearance("[1]", n, sizeof n) == -1, "not an object");
 
+    // gear_abilities against a made-up enum of the game's form (no game files here): names, values, null, refusals
+    static const char en[] = "None = -1 , Aa = 0 , Bb = 1 , Cc = 13 , Main = 100";
+    int64_t sub[3][3];
+    char why[200];
+    CHECK(save_profile_gear_abilities_check("{\"weapon\":50}", en, sub, why, sizeof why) == 0, "no gear_abilities: nothing");
+    CHECK(save_profile_gear_abilities_check("{\"gear_abilities\":{\"head\":[\"Aa\",1,null],\"shoes\":[\"Cc\",\"None\",13]}}",
+                                            en, sub, why, sizeof why) == 5 &&
+              sub[0][0] == 0 && sub[0][1] == 1 && sub[0][2] == -1 && sub[2][0] == 13 && sub[2][1] == -1 && sub[2][2] == 13,
+          "names, values, null and None");
+    static const char *const refused[] = {
+        "{\"gear_abilities\":[1]}",                             // not an object
+        "{\"gear_abilities\":{\"hat\":[0,0,0]}}",                 // an unknown part
+        "{\"gear_abilities\":{\"head\":[0,0]}}",                  // not three
+        "{\"gear_abilities\":{\"head\":[0,0,0,0]}}",
+        "{\"gear_abilities\":{\"head\":\"Aa\"}}",
+        "{\"gear_abilities\":{\"head\":[\"A\",0,0]}}",            // a prefix of a name is not a name
+        "{\"gear_abilities\":{\"head\":[\"aa\",0,0]}}",
+        "{\"gear_abilities\":{\"head\":[2,0,0]}}",                // not a value of the enum
+        "{\"gear_abilities\":{\"head\":[0.5,0,0]}}",
+        "{\"gear_abilities\":{\"head\":[true,0,0]}}",
+        "{\"gear_abilities\":{\"clothes\":[\"Main\",0,0]}}",      // a main-slot ability
+        "{\"gear_abilities\":{\"clothes\":[0,0,100]}}",
+    };
+    for (size_t i = 0; i < sizeof refused / sizeof *refused; i++)
+        CHECK(save_profile_gear_abilities_check(refused[i], en, sub, why, sizeof why) == -1 && why[0], refused[i]);
+    CHECK(save_profile_gear_abilities_check("{\"gear_abilities\":{\"head\":[0,0,0]}}", NULL, sub, why, sizeof why) == -1,
+          "no enum: refused");
+
     char root[1024], dir[1100], p[1200];
     if (!plat_exe_path(root, sizeof root)) return 1;
     char *cut = plat_last_sep(root);

@@ -43,7 +43,7 @@ export interface UiPrefs { full_untouched: boolean; adv_open: boolean; match_pla
 export interface Migration { kind: string; source: string; date: number; files: number; imported: string[]; rejected: string[]; skipped: string[]; shown: boolean }
 export interface ConfigView {
   root: string | null; translator: string | null; language: string; lan_enabled: boolean; lan: LanPrefs;
-  apply_profile: boolean; skip_first_launch: boolean; unlock_all: boolean; relay_exe: string | null; relay_port: number;
+  apply_profile: boolean; skip_first_launch: boolean; unlock_all: boolean; unlock_chunks: boolean; relay_exe: string | null; relay_port: number;
   second_name: string; second_dir: string; match_server: string; ui: UiPrefs;
   /** What the game's language follows while the settings file has no `lang`: the launcher's language or Windows'. */
   game_lang_follow: "launcher" | "windows";
@@ -134,10 +134,13 @@ export interface Profile {
   head: number | null; clothes: number | null; shoes: number | null; weapon: number | null; banner: number | null;
   title: { adjective: number | null; subject: number | null };
   badges: (number | null)[];
+  /** Per gear part: null (never edited) or three slots, each an ability name of the game or null (empty). */
+  sub_abilities: Record<"head" | "clothes" | "shoes", (string | null)[] | null>;
 }
 export const EMPTY_PROFILE: Profile = {
   schema: 1, name: "", style: null, skin: null, eyes: null, hair: null, eyebrows: null, legwear: null, legwear_variation: null,
   head: null, clothes: null, shoes: null, weapon: null, banner: null, title: { adjective: null, subject: null }, badges: [null, null, null],
+  sub_abilities: { head: null, clothes: null, shoes: null },
 };
 
 export interface LanRequest {
@@ -146,7 +149,9 @@ export interface LanRequest {
 export interface RelayStatus { running: boolean; pid: number | null; port: number | null; exe: string | null; log_path: string; tail: string | null; exited: number | null }
 export type ModeId = "hub" | "range" | "lan" | "original";
 export type LaunchedMode = ModeId | "match";
-export interface LaunchOptions { apply_profile: boolean; skip_first_launch: boolean; unlock_all: boolean }
+export interface LaunchOptions { apply_profile: boolean; skip_first_launch: boolean; unlock_all: boolean; unlock_chunks: boolean }
+/** Whether the installed game applies sub-abilities, and which abilities a sub slot can hold (names of the game's enum). */
+export interface GearAbilitiesInfo { supported: boolean; update_needed: boolean; abilities: string[] }
 export interface Refusal { field: string; code: string; id: number | null; species: string | null; style: string | null; from_save: boolean; raw: string }
 export interface Feedback {
   state: "applied" | "already" | "new_save" | "restarting" | "needs_appearance" | "failed" | "none";
@@ -219,6 +224,7 @@ export const api = {
   setRelayExe: (path: string | null) => call<ConfigView>("set_relay_exe", { path }),
   launchReport: (second = false) => call<LaunchReport>("launch_report", { second }),
   setLaunchOptions: (options: LaunchOptions) => call<ConfigView>("set_launch_options", { options }),
+  gearAbilitiesInfo: () => call<GearAbilitiesInfo>("gear_abilities_info"),
   profileCatalogue: (force = false) => call<CatalogueView>("profile_catalogue", { force }),
   stages: () => call<StagesView>("gamedata_stages"),
   iconCache: () => call<IconCacheInfo>("gamedata_icon_cache"),
@@ -300,6 +306,14 @@ export interface UpdateCheck {
   redo: StepId[]; update: UpdatePreview | null; eta: number; eta_max: number;
   /** The player chose to run it when the launcher closes. */
   at_close: boolean;
+  /** The installed game is the previous game version (named here): the game update to `game_to` is needed. It asks for
+   *  the update file, builds beside the old game, keeps the player's data and deletes the old folder at the end.
+   *  `update` is `null` then; `eta` is a first install's estimate, `disk_need` the free space it asks for and
+   *  `old_bytes` what the old folder holds. */
+  game_from: string | null;
+  game_to: string;
+  disk_need: number;
+  old_bytes: number;
 }
 /** Set by the Play page's "Update" button: the wizard opens straight on the plan of that install. `showResult`: the
  *  rail's installation was clicked after it ended: the wizard shows how it ended (ready, or why it stopped). */
@@ -331,12 +345,16 @@ export interface WizardInfo {
   request: InstallRequest; pending: boolean; snapshot: InstallSnapshot; bundle: BundleManifest | null; bundle_error: string | null; default_jobs: number; cpus: number;
   ram: number | null; state_finished: boolean | null; needs_reboot: boolean; last_error: InstallError | null; existing: ExistingInstall[];
   interrupted_step: StepId | null; recovered: string[];
+  /** The game version this launcher builds (`installer::gamever`). */
+  game_version: string;
   /** A first install on this PC (installer::fresh_estimate). */
   fresh: { disk_need: number; footprint: number; eta: number; download_bytes: number };
 }
 export interface ExistingInstall {
   dir: string; kind: "kit" | "wizard"; game_root: string; exe: boolean; exefs: boolean; romfs: boolean; lift: boolean; objects: boolean; xlate: boolean;
   venv: boolean; source: string | null; launcher_data: string | null; needs_files: boolean; previous: boolean; saves: boolean;
+  /** The game in `game_root` is this previous game version: playable offline, the game update is needed. */
+  old_version: string | null;
 }
 export interface RollbackReport { now: string; previous: string }
 export interface FileCheck { status: "ok" | "warn" | "bad"; code: string; params: [string, string][]; size: number | null; program_size: number | null }
@@ -349,6 +367,8 @@ export interface InstallPlan {
   steps: { id: StepId; done: boolean; reference: number }[]; disk_free: number | null; disk_needed: number; disk_peak_step: StepId | null; footprint: number; ram: number | null; cpus: number; jobs: number; source_commit: string | null;
   eta: number; eta_max: number; existing: boolean; existing_finished: boolean; foreign: boolean; needs_files: boolean; incremental: boolean;
   adopted_from_kit: boolean; build_files: number; update: UpdatePreview | null; installed_source: string | null;
+  /** The install holds this previous game version: it is replaced by the new one, its data kept, its folder deleted at the end. */
+  previous_game: string | null; previous_bytes: number;
 }
 export interface UninstallReport { removed: string[]; kept: string[]; freed: number }
 

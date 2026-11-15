@@ -49,6 +49,8 @@ export function GameCheckNotice() {
   const upd = useUpdateCheck();
   const open = () => (upd?.available ? startUpdate(upd.install_dir, go) : go("setup"));
   const dur = upd?.available ? ` (${approx(upd.eta)})` : "";
+  // The installed game is the previous game version: the same "game update needed" state, with its own words.
+  const other = g?.old_version ? { from: g.old_version, to: g.needed_version } : null;
   if (install?.active && install.update) {
     return (
       <div className="notice notice-info cm-old" role="status">
@@ -60,9 +62,9 @@ export function GameCheckNotice() {
   if (gameBlocks(g)) {
     return (
       <div className="notice notice-error cm-old" role="alert">
-        <strong>{c("m.old.title")}</strong>
-        <p className="small">{c("m.old.body")}</p>
-        <button className="btn btn-small" onClick={open}>{c("m.old.btn")}{dur}</button>
+        <strong>{other ? c("m.ver.title", other) : c("m.old.title")}</strong>
+        <p className="small">{other ? c("m.ver.body", other) : c("m.old.body")}</p>
+        <button className="btn btn-small" onClick={open}>{other ? c("m.ver.btn", other) : c("m.old.btn")}{dur}</button>
       </div>
     );
   }

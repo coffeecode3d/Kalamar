@@ -17,8 +17,6 @@ import { populationText } from "../community/population";
 
 // "Game update available" (the wizard's texts stay out of this page's chunk), and the advanced tools.
 const GameUpdateNotice = lazy(() => import("../install/UpdateNotice").then((m) => ({ default: m.GameUpdateNotice })));
-// The launcher's own update (a build without an update repository shows nothing).
-const LauncherUpdateLine = lazy(() => import("../update/LauncherUpdate").then((m) => ({ default: m.LauncherUpdateLine })));
 const AdvancedPlay = lazy(() => import("./play/AdvancedPlay"));
 
 /** Decorative ink blot behind the main block (an original shape, drawn for this launcher). */
@@ -252,8 +250,6 @@ export default function Play() {
         </div>
         {ready && installing === null && <Suspense fallback={null}><GameUpdateNotice /></Suspense>}
       </div>
-
-      <Suspense fallback={null}><LauncherUpdateLine /></Suspense>
 
       {pending && (
         <Problem

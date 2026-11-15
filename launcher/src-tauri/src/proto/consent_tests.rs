@@ -4,11 +4,12 @@
 
 use super::client::Client;
 use super::runner::{GameHost, GameRun, Runner, RunnerSink, RunnerStatus};
+use crate::launch::OpenGame;
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -70,10 +71,14 @@ impl Api {
     }
 }
 
-/// A game that only counts its launches (it then reads as exited at once).
+/// A game that only counts its launches (it then reads as exited at once). `open`: what the game the player has open
+/// stands for; `closes`: how often the runner closed it; `close_fails`: closing it fails.
 #[derive(Default)]
 struct Game {
     launches: AtomicUsize,
+    open: Mutex<Option<OpenGame>>,
+    closes: AtomicUsize,
+    close_fails: AtomicBool,
 }
 
 impl GameHost for Game {
@@ -85,6 +90,17 @@ impl GameHost for Game {
         GameRun { running: false, exited: self.launches.load(SeqCst) > 0, exit_code: Some(0), stopped_by_user: false }
     }
     fn stop(&self) {}
+    fn open_game(&self) -> OpenGame {
+        self.open.lock().unwrap().unwrap_or(OpenGame::Nothing)
+    }
+    fn close_open_game(&self) -> Result<(), String> {
+        self.closes.fetch_add(1, SeqCst);
+        if self.close_fails.load(SeqCst) {
+            return Err("the game that is open could not be closed: access denied".into());
+        }
+        *self.open.lock().unwrap() = None;
+        Ok(())
+    }
     fn build_id(&self) -> String {
         "test".into()
     }
@@ -254,5 +270,61 @@ fn a_relay_the_server_never_announced_is_refused() {
         assert!(last.reason.unwrap_or_default().contains("127.0.0.2:47313"));
         assert!(!s.sink.phases().contains(&"confirm".to_string()));
         assert_eq!(s.game.launches.load(SeqCst), 0);
+    });
+}
+
+/// A match found while the player has a game open for solo play: that game is closed, then the match starts within the
+/// same flow, and the page is told ("closing") before the game starts.
+#[test]
+fn a_game_open_for_solo_play_is_closed_for_the_match() {
+    let s = setup();
+    *s.game.open.lock().unwrap() = Some(OpenGame::Solo);
+    rt().block_on(async {
+        s.client.call("POST", "/v1/queues/duel/tickets", super::http::Body::Json(json!({})), true).await.unwrap();
+        s.client.call("POST", "/v1/matches/m_s1/accept", super::http::Body::None, true).await.unwrap();
+        s.runner.on_match(&ready("m_s1", json!({"kind": "queue", "queue_id": "duel"}), "127.0.0.1"));
+        until("the launch", 5, || s.game.launches.load(SeqCst) == 1).await;
+        assert_eq!(s.game.closes.load(SeqCst), 1);
+        let phases = s.sink.phases();
+        let at = |p: &str| phases.iter().position(|x| x == p);
+        assert!(at("closing").is_some() && at("closing") < at("launching"), "closing comes before launching: {phases:?}");
+        until("the launch report", 5, || !s.api.posts("/v1/matches/m_s1/launch").is_empty()).await;
+        assert!(s.api.posts("/v1/matches/m_s1/result").is_empty(), "no error reported");
+    });
+}
+
+/// The launcher's own match in progress is not closed: the flow keeps its earlier behavior.
+#[test]
+fn a_match_in_progress_is_not_closed_for_another() {
+    let s = setup();
+    *s.game.open.lock().unwrap() = Some(OpenGame::Match);
+    rt().block_on(async {
+        s.client.call("POST", "/v1/queues/duel/tickets", super::http::Body::Json(json!({})), true).await.unwrap();
+        s.client.call("POST", "/v1/matches/m_s2/accept", super::http::Body::None, true).await.unwrap();
+        s.runner.on_match(&ready("m_s2", json!({"kind": "queue", "queue_id": "duel"}), "127.0.0.1"));
+        until("the launch", 5, || s.game.launches.load(SeqCst) == 1).await;
+        assert_eq!(s.game.closes.load(SeqCst), 0, "the match in progress was closed");
+        assert!(!s.sink.phases().contains(&"closing".to_string()));
+    });
+}
+
+/// A game that cannot be closed stops the match with its own code, and the server is told like for any failed launch.
+#[test]
+fn a_game_that_cannot_be_closed_fails_the_match_and_is_reported() {
+    let s = setup();
+    *s.game.open.lock().unwrap() = Some(OpenGame::Solo);
+    s.game.close_fails.store(true, SeqCst);
+    rt().block_on(async {
+        s.client.call("POST", "/v1/queues/duel/tickets", super::http::Body::Json(json!({})), true).await.unwrap();
+        s.client.call("POST", "/v1/matches/m_s3/accept", super::http::Body::None, true).await.unwrap();
+        s.runner.on_match(&ready("m_s3", json!({"kind": "queue", "queue_id": "duel"}), "127.0.0.1"));
+        until("the failure", 5, || s.sink.last().is_some_and(|x| x.phase == "failed")).await;
+        let last = s.sink.last().unwrap();
+        assert_eq!(last.code.as_deref(), Some("game-not-closed"));
+        assert!(last.reason.unwrap_or_default().contains("could not be closed"));
+        assert_eq!(s.game.launches.load(SeqCst), 0, "the game was started anyway");
+        until("the report", 5, || !s.api.posts("/v1/matches/m_s3/result").is_empty()).await;
+        assert_eq!(s.api.posts("/v1/matches/m_s3/result")[0]["error"], "launcher-failed");
+        assert!(s.api.posts("/v1/matches/m_s3/launch").is_empty(), "no launch reported");
     });
 }

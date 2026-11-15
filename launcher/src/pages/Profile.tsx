@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { play } from "../sound/engine";
-import { EMPTY_PROFILE, api, onIconProgress, toAppError, type CatalogueView, type IconCacheInfo, type IconProgress, type LaunchReport, type Preflight, type Profile as ProfileT } from "../api";
+import { EMPTY_PROFILE, api, onIconProgress, toAppError, type CatalogueView, type GearAbilitiesInfo, type IconCacheInfo, type IconProgress, type LaunchReport, type Preflight, type Profile as ProfileT } from "../api";
 import type { Notice } from "../ctx";
 import { useApp } from "../ctx";
 import { errorText, useI18n, type Key, type TFn } from "../i18n";
@@ -49,6 +49,7 @@ export default function Profile({ notify }: { notify: (n: Notice | null) => void
   const [report, setReport] = useState<LaunchReport | null>(null);
   const [cache, setCache] = useState<IconCacheInfo | null>(null);
   const [progress, setProgress] = useState<IconProgress | null>(null);
+  const [subs, setSubs] = useState<GearAbilitiesInfo | null>(null);
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const load = useCallback(async (force: boolean) => {
@@ -83,6 +84,9 @@ export default function Profile({ notify }: { notify: (n: Notice | null) => void
   }, [load]);
 
   useEffect(() => { void api.iconCache().then(setCache).catch(() => {}); }, [tab]);
+  // Does the installed game apply sub-abilities? Asked apart from the catalogue: the first answer may run the game's
+  // capability listing (once per executable, no window).
+  useEffect(() => { void api.gearAbilitiesInfo().then(setSubs).catch(() => setSubs({ supported: false, update_needed: false, abilities: [] })); }, []);
   // During an installation the game data becomes readable when its merge ends (long before the compile does): the
   // catalogue is read again then, without touching what the player is editing.
   useEffect(() => {
@@ -167,11 +171,11 @@ export default function Profile({ notify }: { notify: (n: Notice | null) => void
     [refusal, refusalFieldKey, t, advanced],
   );
   const refusalTabId = refusalFieldKey ? refusalTab(refusalFieldKey) : null;
-  const tabProps = cat ? { cat, profile: p, setProfile, lang, t, game, notes, advanced } : null;
+  const tabProps = cat ? { cat, profile: p, setProfile, lang, t, game, notes, advanced, subs } : null;
   const nameLen = [...p.name.trim()].length;
-  const setOption = (k: "apply_profile" | "skip_first_launch" | "unlock_all", v: boolean) => {
+  const setOption = (k: "apply_profile" | "skip_first_launch" | "unlock_all" | "unlock_chunks", v: boolean) => {
     if (!config) return;
-    void api.setLaunchOptions({ apply_profile: config.apply_profile, skip_first_launch: config.skip_first_launch, unlock_all: config.unlock_all, [k]: v })
+    void api.setLaunchOptions({ apply_profile: config.apply_profile, skip_first_launch: config.skip_first_launch, unlock_all: config.unlock_all, unlock_chunks: config.unlock_chunks, [k]: v })
       .then((c) => { setConfig(c); void api.playPreflight().then(setPre).catch(() => {}); })
       .catch((e) => setNotice(errNotice(e)));
   };
@@ -258,6 +262,13 @@ export default function Profile({ notify }: { notify: (n: Notice | null) => void
                     <span>{t(label)}</span>
                   </label>
                 ))}
+                {subs?.supported && (
+                  <label className="check">
+                    <input type="checkbox" checked={config.unlock_chunks} disabled={!config.apply_profile} onChange={(e) => setOption("unlock_chunks", e.target.checked)} aria-describedby="opt-chunks-hint" />
+                    <span>{t("profile.opts.chunks")}</span>
+                  </label>
+                )}
+                {subs?.supported && <p id="opt-chunks-hint" className="hint opt-hint">{t("profile.opts.chunks.hint")}</p>}
               </div>
             )}
             {readiness && <p className={`next-line ${readiness.ok === false ? "bad" : readiness.ok ? "ok" : ""}`}><span className="hero-dot" />{readiness.text}</p>}

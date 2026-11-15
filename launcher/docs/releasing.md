@@ -9,23 +9,51 @@ A build that names no repository (the default, every development build) has no u
 interface, no network access.
 
 - Code: `src-tauri/src/update/` (`channel.rs` configuration, `check.rs` the API, `net.rs` hosts and downloads,
-  `manifest.rs` signature and manifest, `apply.rs` replacement and roll-back), `src/update/LauncherUpdate.tsx` (the
-  page).
+  `manifest.rs` signature and manifest, `apply.rs` replacement and roll-back), `src/update/` (`store.ts` the
+  state, `prompt.ts` which prompt shows when, `UpdateBar.tsx` the bar, the dialog and the badge,
+  `LauncherUpdate.tsx` Settings › About).
 - Tools: `src-tauri/examples/release_sign.rs` (manifest, check), the official `minisign` tool (keys, signature),
   `scripts/make-release.ps1` (the whole release folder).
 - Public keys: `src-tauri/update-keys.txt`. **Secret keys never enter this repository.**
 
 ## 1. How a launcher updates
 
-1. **Check.** 20 s after start, at most once per 24 h, if "Check automatically" is on (Settings › About, on by
-   default), and when the player presses "Check for updates". One request to `api.github.com`
+1. **Check.** 20 s after every start of the launcher, then every 6 hours while it stays open, if "Check automatically"
+   is on (Settings › About, on by default; the switch turns all of it off), and when the player presses "Check for
+   updates". The check at each start costs almost nothing when nothing changed: the ETag makes GitHub answer 304 with no
+   body. One request to `api.github.com`
    (`/repos/<repo>/releases/latest`, or the last 10 releases on the beta channel), with `If-None-Match` (GitHub's ETag)
    and no token, cookie or identifier (`User-Agent: Kalamar-Launcher`). Only the tag name and the pre-release/draft
    flags of the answer are read. For a tag above the running version, the launcher downloads
    `kalamar-release.json` and `kalamar-release.json.minisig` from that release and checks them; nothing else. A
-   failure (network, rate limit, refused manifest) shows nothing on the Play page; Settings › About says it.
-2. **Offer.** A quiet line on the Play page: "Kalamar update available: 0.2.0", **Update** / **Later** (put off for
-   24 h), the release notes of the signed manifest as plain text. Nothing is downloaded before the click.
+   failure (network, rate limit, refused manifest) shows nothing on the bar; Settings › About says it.
+2. **Offer.** Everywhere, so that a player who lives on the Community pages or in the Locker sees it
+   (`src/update/UpdateBar.tsx`, rules in `src/update/prompt.ts`, tested in `prompt.test.mjs`):
+   - **The bar**, at the top of the content area of every page (Play, Locker, Community and its sub-pages, Settings,
+     the install wizard), above the page so it never covers it. It names the version, says the state and carries the
+     state's main action: "Kalamar update available: 0.2.0" (**Update** / **Later**); "Downloading Kalamar 0.2.0… 42 %"
+     (**Cancel**); "Kalamar 0.2.0 is ready." (**Restart to finish**, or **Start the installation**, or **Choose a
+     folder…**); the same with the button off and "Possible once the game is closed." (or "…the game installation is
+     over." / "…the relay started by Kalamar is stopped.") while a game, an installation or a relay runs; the failure
+     of a download or an apply, with **Try again**; the result of the last update ("Kalamar was updated: version 0.2.0.",
+     "Version 0.2.0 did not start properly: Kalamar 0.1.0 was put back. Nothing is lost."). It uses the commands of
+     Settings › About; there is no second state machine.
+   - **Later** (bar or dialog) puts the update off **until the next start of the launcher** (kept in memory, not on
+     disk; a newer version found meanwhile shows again). The bar goes away and the **Settings** entry of the rail gets a
+     dot that leads straight to Settings › About; the update stays one click away there. A download in progress, a
+     ready update, a failure and a result are never hidden by "Later".
+   - **The dialog**, once per run of the launcher, when an update waits for an answer: "Kalamar 0.2.0 is available",
+     what is new (the signed manifest's notes as plain text, never HTML), **Update now** (starts the download; the
+     bar then shows it) and **Later** (Escape too). It never opens over a match (a search, a found or running match, a
+     private match connecting, a launch from the command line), an installation, a running game or another dialog, nor
+     in the install wizard; it waits until the launcher has been idle for 1.5 s. The bar is compact (one line, no state
+     text) while a match is on.
+   - **The game update** ("Game update available" with its class and duration, "Game update needed: Splatoon 3 11.3.0",
+     buttons **Update** / **Later**, the existing flow) uses the same bar on every page but Play, which carries it in
+     full. The launcher's update comes first: the new launcher usually carries the new engine code and sometimes the new
+     game version, so what the game update would do is only known once the launcher is current. "Later" on a game update
+     is also kept until the next start, with a dot on Settings that leads to Settings › Installed game.
+   Nothing is downloaded before the click.
 3. **Download.** In the background into `<data>\update\download\<tag>\` (`KALAMAR_DATA` respected), with
    progress, resumed with a `Range` request after a cut (three retries), stopped as soon as it passes the signed size;
    then the SHA-256 is compared with the manifest. A mismatch deletes the file.
@@ -179,9 +207,15 @@ Launchers accept a manifest signed by **any** key of their `update-keys.txt`; th
   generate: check with ETag, a download cut and resumed, the swap of a copy of the test executable in a temporary
   folder, its restart and witness, the roll-back of a new version that crashes or hangs, an altered or longer file,
   a redirect off the list, a rate limit, the installer and "save elsewhere" cases. Nothing reaches GitHub.
-- `npm run dev:mock` then `?lup=available` (or `downloading`, `ready`, `blocked&game=running`, `installer`,
-  `elsewhere`, `readonly`, `saved`, `integrity`, `updated`, `rolledback`, `uptodate`, `error`, `untrusted`, `beta`)
-  and `&page=settings&section=about`: every state of the interface.
+- `cargo test` also covers the cadence (`auto_wait`: 20 s, then 6 h; a check at each start still sends the ETag and
+  fetches no manifest again) and "Later" kept for one run only. `npm run test:ui` runs `src/update/prompt.test.mjs`:
+  which prompt shows for each state, page, busy condition (match, installation, game) and "Later".
+- `npm run dev:mock` then `?lup=available` (or `downloading`, `ready`, `blocked&game=running`, `relay`, `installer`,
+  `elsewhere`, `readonly`, `saved`, `integrity`, `updated`, `rolledback`, `later`, `uptodate`, `error`, `untrusted`,
+  `beta`) and `&page=profile`, `&server=service&page=community`, `&page=settings&section=about`: every state of the
+  bar, the badge and the page's line in About. The dialog opens 1.5 s after the page is up; `&dlg=0` says it was
+  already answered (the bar alone). `&upd=short|long|full` or `&ver=old` with another page than Play shows the game
+  update on the bar. The screenshots are the `lup-*` and `gup-*` entries of `scripts/ui-shots.list.mjs`.
 - `cargo run --example release_sign -- verify --dir <release folder> --repo owner/kalamar` repeats the launcher's check
   on a release folder at any time.
 - A trial run of the release tools without your key: `KALAMAR_TRIAL_DIR=<folder outside the repository>`,

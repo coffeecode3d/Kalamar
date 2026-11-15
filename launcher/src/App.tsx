@@ -25,6 +25,8 @@ const CloseDuringInstall = lazy(() => import("./install/CloseDuringInstall").the
 // Community protocol client (src/community/): loaded when its page is first opened, never at start-up.
 const CommunityPage = lazy(() => import("./community/CommunityPage"));
 const CommunityOverlay = lazy(() => import("./community/Overlay"));
+// The update bar (every page), the start dialog and the badge: the launcher's own update, then the game's.
+const UpdatePrompts = lazy(() => import("./update/UpdateBar"));
 
 /** What a page shows while its code loads (a few milliseconds from the local files). */
 function PageLoading() {
@@ -100,6 +102,8 @@ export default function App() {
   const [firstRun, setFirstRun] = useState(false);
   /** The window was closed during an installation: ask what to do. */
   const [closeAsk, setCloseAsk] = useState(false);
+  /** What the player put off on the update bar: a dot on the Settings entry (the section it leads to). */
+  const [updBadge, setUpdBadge] = useState<"about" | "installed" | null>(null);
   const [servers, setServers] = useState<ServersView | null>(null);
   const [migration, setMigration] = useState<Migration | null>(null);
   const [cliPlay, setCliPlay] = useState<QuickMode | null>(null);
@@ -307,6 +311,7 @@ export default function App() {
       <I18nContext.Provider value={{ lang, t }}>
         <Ctx.Provider value={{ ...ctx, go: (p, arg) => { setFirstRun(false); go(p, arg); } }}>
           <div className="shell shell-setup">
+            <Suspense fallback={null}><UpdatePrompts page="setup" onBadge={setUpdBadge} /></Suspense>
             <main className="main" id="main">
               <Suspense fallback={<PageLoading />}><Wizard firstRun onExit={() => { setFirstRun(false); go("play"); }} /></Suspense>
             </main>
@@ -333,10 +338,13 @@ export default function App() {
               <nav aria-label={t("nav.label")} className="nav">
                 {NAV.filter((n) => !n.needsServer || hasServer).map((n) => {
                   const on = page === n.id || (n.id === "settings" && page === "setup");
+                  // Something put off on the update bar: the Settings entry says so and leads to its section.
+                  const dot = n.id === "settings" && updBadge !== null;
                   return (
-                    <button key={n.id} className={`nav-item ${on ? "on" : ""}`} data-nav={n.id} onClick={() => go(n.id)} aria-current={on ? "page" : undefined}>
+                    <button key={n.id} className={`nav-item ${on ? "on" : ""}`} data-nav={n.id} onClick={() => go(n.id, dot ? updBadge : undefined)} aria-current={on ? "page" : undefined}>
                       <span className="nav-ico">{n.icon}</span>
                       <span className="nav-label">{t(n.label)}</span>
+                      {dot && <><span className="nav-dot" aria-hidden="true" /><span className="sr-only">{t("nav.badge.update")}</span></>}
                     </button>
                   );
                 })}
@@ -361,6 +369,8 @@ export default function App() {
               </div>
             </aside>
 
+            <div className="content">
+            <Suspense fallback={null}><UpdatePrompts page={page} onBadge={setUpdBadge} /></Suspense>
             <main className="main" id="main">
               <div className="page-anim" key={page}>
                 {page === "play" && <Play />}
@@ -373,6 +383,7 @@ export default function App() {
                 </Suspense>
               </div>
             </main>
+            </div>
 
             <MigrationNotice initial={migration} />
             {presence}

@@ -41,7 +41,7 @@ Removing the server (or choosing another one) logs out and stops every connectio
 ## What the launcher sends, and when
 
 The launcher has no telemetry. Apart from the check for its own updates (published releases only: GitHub's release
-API at most once a day, can be turned off in Settings › About; nothing about you or your servers is sent), its
+API 20 s after each start and every 6 hours while the launcher stays open, can be turned off in Settings › About; nothing about you or your servers is sent), its
 network accesses with servers added are only these:
 
 | When | To | What |

@@ -185,6 +185,16 @@ Splatoon 3 11.2.0 (`splatoon3-v1120`, program `0100C2500FC20000`) has `main` and
 `rtld` are byte for byte those of TotK 1.4.3. Its patch table holds spin waits only (`tools/spin_waits.py`); TotK's
 tables do not apply.
 
+Splatoon 3 11.3.0 (`splatoon3-v1130`) is built the same way from the base game and the 11.3.0 update: the commands
+below with `splatoon3-v1130` and its own work folder. Its `sdk` and `rtld` are the same files; `main` was rebuilt, so
+everything keyed on a `main` offset has a row per build: the spin waits (`recomp/patches-splatoon3-v1130.txt`, from
+`tools/spin_waits.py` on the new `main`), the `--boot` values of `recomp/targets.py`, and the offsets the start scene
+and the automatic match use (`runtime/splat3_addr.c`). That file also holds the tag the build's RomFS puts in the names
+of its tables and message archives (`b20` for 11.2.0, `b30` for 11.3.0). A later build gets its rows from a known one with
+`tools/port_offsets.py --old <known exefs> --new <new exefs> --code ... --data ... --string ... --patches <known
+table>`: it matches the two builds' code and says for each offset where it went, how it was matched and whether the
+match is certain. Its report holds offsets and counts only.
+
 `build_game.py --version <target>` takes any target of `recomp/targets.py`. It writes the target into `modules.c`
 (`rt_target`, `runtime/host.h`): the game family, the program id (GetInfo, save data, the `main.npdm` check of
 `runtime/boot.c`), whether `sdk` is SDK 20.5's, whether the game links libmovie, and the `--boot` checks. Code that

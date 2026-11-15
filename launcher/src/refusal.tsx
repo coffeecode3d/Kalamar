@@ -7,6 +7,10 @@ export type ProfileTab = "character" | "gear" | "weapon" | "splashtag";
 
 /** The profile field a refusal is about, as one of the keys of the notes the tabs show. */
 export function refusalField(r: Refusal, p: Profile): string {
+  if (r.field === "sub_abilities") {
+    for (const slot of ["head", "clothes", "shoes"] as const) if (r.id != null && p[slot] === r.id) return `sub_abilities.${slot}`;
+    return r.field;
+  }
   if (r.field !== "gear") return r.field;
   // the runtime names the gear id, not the slot
   for (const slot of ["head", "clothes", "shoes"] as const) if (r.id != null && p[slot] === r.id) return slot;
@@ -17,7 +21,8 @@ export function refusalTab(field: string): ProfileTab | null {
   switch (field) {
     case "style": case "skin": case "eyes": case "hair": case "eyebrows": case "legwear": case "legwear_variation": case "appearance":
       return "character";
-    case "head": case "clothes": case "shoes": case "gear":
+    case "head": case "clothes": case "shoes": case "gear": case "sub_abilities":
+    case "sub_abilities.head": case "sub_abilities.clothes": case "sub_abilities.shoes":
       return "gear";
     case "weapon":
       return "weapon";

@@ -22,6 +22,10 @@
 # Frame queue: the game starts a frame while the previous one waits for its display time, so a frame that runs long
 # still makes its turn. Far fewer dropped frames at the limit for up to one frame more input delay. Takes effect at once.
 # frame_queue = 0
+# Low-latency pacing (Splatoon 3): a frame is started as late as it can be and still be shown at its turn, so what the
+# screen shows follows the mouse, the keys and the controller by about one frame instead of three. 0 goes back to the
+# older pacing, which holds every finished frame two more frames. Takes effect at once.
+# low_latency = 1
 # Real-time frame step: game speed follows the clock instead of the frame count.
 # realtime = 1
 # Cloth simulation on the real-time clock. Needs realtime = 1.

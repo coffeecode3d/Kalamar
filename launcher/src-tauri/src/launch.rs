@@ -415,6 +415,126 @@ impl GameManager {
     }
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// A match found while a game is open
+
+/// The `mode` of a launch that plays a match (private match code or community server): the game of such a launch is
+/// a match in progress, never closed for another one.
+pub const MATCH_MODE: &str = "match";
+
+/// How long a game asked to close (its window's close request) has to end by itself before it is terminated.
+pub const CLOSE_GRACE: Duration = Duration::from_secs(6);
+/// How long a terminated game has to be gone before closing it counts as failed.
+pub const CLOSE_FORCE_WAIT: Duration = Duration::from_secs(3);
+
+/// What the game that is open (if any) stands for when a match needs the game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenGame {
+    /// No game of the launcher runs.
+    Nothing,
+    /// A game started for solo play (or any mode but a match): it cannot play the match and is closed for it.
+    Solo,
+    /// The launcher's own match in progress: left alone.
+    Match,
+}
+
+/// Classifies the first player's game by the launcher's own state: running (or restarted into its second process) and
+/// started by a match launch, or not.
+pub fn open_game(s: &GameStatus) -> OpenGame {
+    if s.state != RunState::Running && !s.restarted {
+        OpenGame::Nothing
+    } else if s.mode.as_deref() == Some(MATCH_MODE) {
+        OpenGame::Match
+    } else {
+        OpenGame::Solo
+    }
+}
+
+/// How an open game was dealt with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Closed {
+    /// Nothing was open.
+    Nothing,
+    /// A match in progress: not touched.
+    KeptMatch,
+    /// The game ended by itself when asked to close.
+    Clean,
+    /// The game did not end in time and was terminated.
+    Forced,
+}
+
+/// What [`close_open_game`] needs of the game it closes.
+pub trait GameCloser {
+    fn open_game(&self) -> OpenGame;
+    /// Asks the game to close the way its window's close button does; `true` when the request was made.
+    fn ask_to_close(&self) -> bool;
+    /// The game still runs.
+    fn is_open(&self) -> bool;
+    /// Terminates the game (only the one this launcher started, and the process it restarted into).
+    fn force_close(&self) -> AppResult<()>;
+}
+
+fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let end = std::time::Instant::now() + limit;
+    loop {
+        if done() {
+            return true;
+        }
+        if std::time::Instant::now() >= end {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Closes a game opened for solo play so that a match can start: ask it to close and wait `grace` for it to end by
+/// itself, else terminate it and wait `force_wait` for it to be gone. A match in progress is never touched. `Err` when
+/// the game is still there at the end (the match cannot start then).
+pub fn close_open_game(g: &dyn GameCloser, grace: Duration, force_wait: Duration) -> AppResult<Closed> {
+    match g.open_game() {
+        OpenGame::Nothing => return Ok(Closed::Nothing),
+        OpenGame::Match => return Ok(Closed::KeptMatch),
+        OpenGame::Solo => {}
+    }
+    if g.ask_to_close() && wait_until(grace, || !g.is_open()) {
+        return Ok(Closed::Clean);
+    }
+    if let Err(e) = g.force_close()
+        && g.is_open()
+    {
+        return Err(AppError::Internal(format!("the game that is open could not be closed: {e}")));
+    }
+    if wait_until(force_wait, || !g.is_open()) {
+        Ok(Closed::Forced)
+    } else {
+        Err(AppError::Internal("the game that is open did not end when it was terminated".into()))
+    }
+}
+
+impl GameCloser for GameManager {
+    fn open_game(&self) -> OpenGame {
+        open_game(&self.status())
+    }
+    fn ask_to_close(&self) -> bool {
+        let mut g = self.lock();
+        // The game ends because the launcher asked: its exit is not a crash (no failure tail, no "abnormal").
+        g.stop_requested = true;
+        let (pid, exe) = (g.status.pid, g.exe.clone());
+        drop(g);
+        exe.is_some_and(|e| crate::winutil::request_close(pid, &e))
+    }
+    fn is_open(&self) -> bool {
+        let s = self.status();
+        s.state == RunState::Running || s.restarted
+    }
+    fn force_close(&self) -> AppResult<()> {
+        match self.stop() {
+            Err(AppError::NotRunning) => Ok(()),
+            r => r,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,6 +624,150 @@ mod tests {
         let miss = missing_for_launch(Path::new(r"Z:\nowhere\root"), None);
         assert!(miss.contains(&"root".to_string()));
         assert!(miss.contains(&"exe".to_string()));
+    }
+
+    fn running(mode: &str, restarted: bool, state: RunState) -> GameStatus {
+        GameStatus { state, mode: Some(mode.into()), pid: Some(1), restarted, ..GameStatus::idle() }
+    }
+
+    #[test]
+    fn what_the_open_game_stands_for() {
+        assert_eq!(open_game(&GameStatus::idle()), OpenGame::Nothing);
+        assert_eq!(open_game(&running("hub", false, RunState::Exited)), OpenGame::Nothing);
+        for mode in ["hub", "original", "range", "lan"] {
+            assert_eq!(open_game(&running(mode, false, RunState::Running)), OpenGame::Solo, "{mode}");
+        }
+        assert_eq!(open_game(&running("match", false, RunState::Running)), OpenGame::Match);
+        // the game that restarted itself is still the game of its mode
+        assert_eq!(open_game(&running("original", true, RunState::Exited)), OpenGame::Solo);
+        assert_eq!(open_game(&running("match", true, RunState::Exited)), OpenGame::Match);
+    }
+
+    /// A game that records what is done to it. `obeys`: it ends when asked to close; `dies`: it ends when terminated.
+    struct Fake {
+        kind: OpenGame,
+        obeys: bool,
+        dies: bool,
+        open: std::sync::atomic::AtomicBool,
+        asked: std::sync::atomic::AtomicUsize,
+        forced: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Fake {
+        fn new(kind: OpenGame, obeys: bool, dies: bool) -> Fake {
+            Fake { kind, obeys, dies, open: (kind != OpenGame::Nothing).into(), asked: 0.into(), forced: 0.into() }
+        }
+        fn calls(&self) -> (usize, usize) {
+            (self.asked.load(std::sync::atomic::Ordering::SeqCst), self.forced.load(std::sync::atomic::Ordering::SeqCst))
+        }
+    }
+
+    impl GameCloser for Fake {
+        fn open_game(&self) -> OpenGame {
+            self.kind
+        }
+        fn ask_to_close(&self) -> bool {
+            self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.obeys {
+                self.open.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+            true
+        }
+        fn is_open(&self) -> bool {
+            self.open.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn force_close(&self) -> AppResult<()> {
+            self.forced.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.dies {
+                self.open.store(false, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            } else {
+                Err(AppError::Internal("access denied".into()))
+            }
+        }
+    }
+
+    const SHORT: Duration = Duration::from_millis(250);
+
+    #[test]
+    fn no_game_open_nothing_is_done() {
+        let g = Fake::new(OpenGame::Nothing, true, true);
+        assert_eq!(close_open_game(&g, SHORT, SHORT).unwrap(), Closed::Nothing);
+        assert_eq!(g.calls(), (0, 0));
+    }
+
+    #[test]
+    fn a_solo_game_is_asked_to_close_first() {
+        let g = Fake::new(OpenGame::Solo, true, true);
+        assert_eq!(close_open_game(&g, SHORT, SHORT).unwrap(), Closed::Clean);
+        assert_eq!(g.calls(), (1, 0), "asked, never terminated");
+    }
+
+    #[test]
+    fn a_solo_game_that_does_not_close_is_terminated() {
+        let g = Fake::new(OpenGame::Solo, false, true);
+        assert_eq!(close_open_game(&g, SHORT, SHORT).unwrap(), Closed::Forced);
+        assert_eq!(g.calls(), (1, 1));
+    }
+
+    #[test]
+    fn our_own_match_is_never_touched() {
+        let g = Fake::new(OpenGame::Match, true, true);
+        assert_eq!(close_open_game(&g, SHORT, SHORT).unwrap(), Closed::KeptMatch);
+        assert_eq!(g.calls(), (0, 0));
+        assert!(g.is_open());
+    }
+
+    /// A solo game whose termination is accepted but which never goes away.
+    struct Stuck;
+
+    impl GameCloser for Stuck {
+        fn open_game(&self) -> OpenGame {
+            OpenGame::Solo
+        }
+        fn ask_to_close(&self) -> bool {
+            false
+        }
+        fn is_open(&self) -> bool {
+            true
+        }
+        fn force_close(&self) -> AppResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_game_that_will_not_end_is_an_error() {
+        // terminating is refused and the game is still there
+        let g = Fake::new(OpenGame::Solo, false, false);
+        let e = close_open_game(&g, SHORT, SHORT).unwrap_err().to_string();
+        assert!(e.contains("could not be closed") && e.contains("access denied"), "{e}");
+        assert_eq!(g.calls(), (1, 1));
+        // terminating is accepted but the game is still there after the wait
+        let e = close_open_game(&Stuck, SHORT, SHORT).unwrap_err().to_string();
+        assert!(e.contains("did not end"), "{e}");
+    }
+
+    #[test]
+    fn a_game_gone_when_the_terminate_fails_is_closed() {
+        // it ended between the request and the terminate: nothing left to do
+        struct Gone(std::sync::atomic::AtomicBool);
+        impl GameCloser for Gone {
+            fn open_game(&self) -> OpenGame {
+                OpenGame::Solo
+            }
+            fn ask_to_close(&self) -> bool {
+                false
+            }
+            fn is_open(&self) -> bool {
+                self.0.load(std::sync::atomic::Ordering::SeqCst)
+            }
+            fn force_close(&self) -> AppResult<()> {
+                self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+                Err(AppError::Internal("already gone".into()))
+            }
+        }
+        assert_eq!(close_open_game(&Gone(true.into()), SHORT, SHORT).unwrap(), Closed::Forced);
     }
 
     #[cfg(windows)]
@@ -601,6 +865,68 @@ mod tests {
             assert!(!s.abnormal && s.tail.is_none());
             std::fs::remove_dir_all(dir).unwrap();
             std::fs::remove_dir_all(dir2).unwrap();
+        }
+
+        #[test]
+        fn a_solo_process_is_closed_for_the_match_and_a_match_process_is_not() {
+            // `ping.exe` stands in for the game (it has no window, so only the terminate step can end it).
+            let (spec, dir) = spec_for("close", system_exe("ping.exe"), &["-n", "30", "127.0.0.1"]);
+            let m = GameManager::new();
+            m.launch(&spec, Arc::new(|_| {})).unwrap();
+            let pid = m.status().pid.unwrap();
+            assert_eq!(m.open_game(), OpenGame::Solo);
+            assert_eq!(close_open_game(&m, Duration::from_millis(300), Duration::from_secs(5)).unwrap(), Closed::Forced);
+            let s = wait_exit(&m);
+            assert!(s.stopped_by_user && !s.abnormal, "closed by the launcher is not a crash: {s:?}");
+            assert_eq!(crate::installer::sys::process_alive(pid, "ping.exe"), Some(false));
+            assert_eq!(m.open_game(), OpenGame::Nothing);
+            // the match can start now
+            let (ok, dir2) = spec_for("closed-ok", system_exe("cmd.exe"), &["/C", "exit 0"]);
+            m.launch(&ok, Arc::new(|_| {})).unwrap();
+            wait_exit(&m);
+
+            // a match in progress: left running, and still refuses a second launch as before
+            let (mut spec, dir3) = spec_for("keep", system_exe("ping.exe"), &["-n", "30", "127.0.0.1"]);
+            spec.mode = MATCH_MODE.into();
+            let m = GameManager::new();
+            m.launch(&spec, Arc::new(|_| {})).unwrap();
+            let pid = m.status().pid.unwrap();
+            assert_eq!(close_open_game(&m, Duration::from_millis(300), Duration::from_millis(300)).unwrap(), Closed::KeptMatch);
+            assert_eq!(m.status().state, RunState::Running);
+            assert_eq!(crate::installer::sys::process_alive(pid, "ping.exe"), Some(true));
+            assert!(matches!(m.launch(&spec, Arc::new(|_| {})), Err(AppError::AlreadyRunning)));
+            m.stop().unwrap();
+            wait_exit(&m);
+            for d in [dir, dir2, dir3] {
+                std::fs::remove_dir_all(d).unwrap();
+            }
+        }
+
+        #[test]
+        fn a_process_that_ends_when_asked_is_not_terminated() {
+            // The game ends by itself when its window is asked to close: simulated by ending the stand-in at the request.
+            struct Obeys(GameManager);
+            impl GameCloser for Obeys {
+                fn open_game(&self) -> OpenGame {
+                    self.0.open_game()
+                }
+                fn ask_to_close(&self) -> bool {
+                    let _ = self.0.lock().child.as_mut().map(|c| c.kill());
+                    true
+                }
+                fn is_open(&self) -> bool {
+                    self.0.is_open()
+                }
+                fn force_close(&self) -> AppResult<()> {
+                    panic!("terminated a game that was closing");
+                }
+            }
+            let (spec, dir) = spec_for("obeys", system_exe("ping.exe"), &["-n", "30", "127.0.0.1"]);
+            let m = GameManager::new();
+            m.launch(&spec, Arc::new(|_| {})).unwrap();
+            assert_eq!(close_open_game(&Obeys(m.clone()), Duration::from_secs(5), Duration::from_secs(1)).unwrap(), Closed::Clean);
+            assert_eq!(m.status().state, RunState::Exited);
+            std::fs::remove_dir_all(dir).unwrap();
         }
 
         #[test]

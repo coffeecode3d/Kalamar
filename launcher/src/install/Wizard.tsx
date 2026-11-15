@@ -223,7 +223,8 @@ export default function Wizard({ reinstall, onExit, firstRun }: { reinstall?: bo
 
   /** "Update the installed game": the folder of an existing install; its extracted data makes the files optional. */
   const adopt = async (e: ExistingInstall) => {
-    const r = { ...req, install_dir: e.dir };
+    // An install of the previous game version asks for the new update file only: the one remembered is the old one.
+    const r = { ...req, install_dir: e.dir, update_nsp: e.old_version ? "" : req.update_nsp };
     setReq(r);
     if (e.needs_files) return setScreen("files");
     try {
@@ -259,6 +260,9 @@ export default function Wizard({ reinstall, onExit, firstRun }: { reinstall?: bo
   const shown: Screen = snap?.outcome === "done" && screen === "install" ? "done" : screen;
   useEffect(() => { document.getElementById("main")?.scrollTo(0, 0); }, [shown]);
   const existing = (info?.existing ?? []).filter((e) => e.exe || e.exefs);
+  // The install being set up holds the previous game version: only the new update file is new to it.
+  const upgrade = info?.existing.find((e) => e.old_version && e.dir.toLowerCase() === req.install_dir.trim().toLowerCase()) ?? null;
+  const gameTo = info?.game_version ?? "";
 
   return (
     <section className="page wiz" aria-labelledby="wiz-title">
@@ -286,8 +290,8 @@ export default function Wizard({ reinstall, onExit, firstRun }: { reinstall?: bo
           )}
           {!info?.pending && existing.map((e) => (
             <div key={e.dir} className="card card-ok wiz-existing">
-              <h2 className="card-title">{w(e.kind === "kit" ? "wiz.exist.kit" : "wiz.exist.wizard")}</h2>
-              <p>{w(e.needs_files ? "wiz.exist.files" : "wiz.exist.nofiles2")} {w("wiz.exist.data")}</p>
+              <h2 className="card-title">{e.old_version ? w("wiz.exist.old.title", { from: e.old_version, to: gameTo }) : w(e.kind === "kit" ? "wiz.exist.kit" : "wiz.exist.wizard")}</h2>
+              <p>{e.old_version ? w("wiz.exist.old.text", { from: e.old_version, to: gameTo }) : `${w(e.needs_files ? "wiz.exist.files" : "wiz.exist.nofiles2")} ${w("wiz.exist.data")}`}</p>
               {advanced && (
                 <ul className="wiz-list small muted">
                   <li className="mono">{e.dir}</li>
@@ -296,8 +300,8 @@ export default function Wizard({ reinstall, onExit, firstRun }: { reinstall?: bo
                 </ul>
               )}
               <div className="row wrap">
-                <button className="btn" onClick={() => void adopt(e)}><IconRefresh /> {w("wiz.exist.update")}</button>
-                {e.exe && <button className="btn btn-ghost" onClick={() => void useAsIs(e)}>{w("wiz.exist.asis")}</button>}
+                <button className="btn" onClick={() => void adopt(e)}><IconRefresh /> {e.old_version ? w("wiz.exist.old.go", { to: gameTo }) : w("wiz.exist.update")}</button>
+                {e.exe && <button className="btn btn-ghost" onClick={() => void useAsIs(e)}>{e.old_version ? w("wiz.exist.old.asis", { from: e.old_version }) : w("wiz.exist.asis")}</button>}
               </div>
             </div>
           ))}
@@ -338,6 +342,7 @@ export default function Wizard({ reinstall, onExit, firstRun }: { reinstall?: bo
           <h1 id="wiz-title" className="display wiz-title">{w("wiz.files.title")}</h1>
           <p className="wiz-lead">{w("wiz.files.lead")}</p>
           {dir && !dir.needs_files && <div className="notice notice-ok"><IconCheck width="1.2em" height="1.2em" /><span>{w("wiz.files.notneeded")}</span></div>}
+          {upgrade && <div className="notice notice-info"><IconInfo width="1.2em" height="1.2em" /><span>{w("wiz.files.upgrade", { from: upgrade.old_version ?? "", to: gameTo })}</span></div>}
           <div className="card wiz-files">
             <FileRow label={w("wiz.file.base")} hint={w("wiz.file.base.hint")} value={req.base_nsp} pickLabel={w("wiz.file.pick")}
               onChange={(v) => setReq({ ...req, base_nsp: v })} onPick={() => void pick("base")} check={<Check c={checks.base} w={w} />} invalid={fieldErr.base_nsp} />
@@ -345,7 +350,7 @@ export default function Wizard({ reinstall, onExit, firstRun }: { reinstall?: bo
               onChange={(v) => setReq({ ...req, update_nsp: v })} onPick={() => void pick("update")} check={<Check c={checks.update} w={w} />} invalid={fieldErr.update_nsp} />
             <FileRow label={w("wiz.file.keys")} hint={w("wiz.file.keys.hint")} value={req.prod_keys} pickLabel={w("wiz.file.pick")}
               onChange={(v) => setReq({ ...req, prod_keys: v })} onPick={() => void pick("keys")} check={<Check c={checks.keys} w={w} />} invalid={fieldErr.prod_keys} />
-            <FileRow label={w("wiz.file.dir")} hint={advanced ? w("wiz.file.dir.hint", { sub: "work\\splatoon3-11.2.0" }) : w("wiz.file.dir.hint2")} value={req.install_dir} pickLabel={w("wiz.file.pickdir")}
+            <FileRow label={w("wiz.file.dir")} hint={advanced ? w("wiz.file.dir.hint", { sub: `work\\splatoon3-${gameTo}` }) : w("wiz.file.dir.hint2")} value={req.install_dir} pickLabel={w("wiz.file.pickdir")}
               onChange={(v) => setReq({ ...req, install_dir: v })} onPick={() => void pickDir()} invalid={fieldErr.install_dir}
               check={dir && (
                 <>
@@ -403,6 +408,7 @@ export default function Wizard({ reinstall, onExit, firstRun }: { reinstall?: bo
             <button className="btn btn-big btn-play wiz-done-play" data-autofocus onClick={() => { onExit?.(); go("play"); }}><IconPlay /> {w("ready.play")}</button>
           </div>
           <ReadyRecap />
+          {snap.warnings.includes("old_game_left") && <div className="wiz-check warn"><IconInfo />{w("wiz.run.warn.old_game_left")}</div>}
           <p className="hint">{advanced ? w("wiz.done.note") : w("wiz.done.note2")}</p>
           {advanced && info?.existing.some((e) => e.dir.toLowerCase() === (snap.install_dir ?? "").toLowerCase() && e.exe) && snap.steps.some((s) => s.id === "compile" && s.status === "done") && <p className="hint">{w("wiz.done.rollback")}</p>}
         </div>
@@ -441,6 +447,11 @@ function PlanView({ plan, req, agree, setAgree, advanced, onBack, onStart }: {
       {plan.existing && (
         <div className="notice notice-ok"><IconCheck width="1.2em" height="1.2em" />
           <span>{w(plan.needs_files ? "wiz.plan.update.files" : "wiz.plan.update.nofiles")} {w("wiz.plan.update.safe")}</span>
+        </div>
+      )}
+      {plan.previous_game && (
+        <div className="notice notice-info"><IconInfo width="1.2em" height="1.2em" />
+          <span>{w("wiz.plan.previous", { from: plan.previous_game, size: gb(plan.previous_bytes, 1) })}</span>
         </div>
       )}
       {plan.update && (

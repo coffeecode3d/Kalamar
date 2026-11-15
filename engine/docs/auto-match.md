@@ -495,7 +495,7 @@ A host's file (round 1 of a session), shortened:
 ```
 
 Each team also has `count` (`+0xa8`: 100 at the start; the modes' count, inferred from two matches), and each player
-`weapon` (`+0x240`) and `gear` (`[head, clothes, shoes]`, `+0x2c8`, `+0x4d0`, `+0x6d8`), the game's ids. How far each field can be relied
+`weapon` (`+0x240`) and `gear` (`[head, clothes, shoes]`, `+0x2c8`, `+0x4d0`, `+0x6d8`), the game's ids. `abilities` (prototype): for each of the three pieces `[main, sub, sub, sub]` as ability enum values, -1 for an empty slot (the gear record's `+0x14`, `+0xa0`, `+0x118`, `+0x190`, which hold the ability's position in main's enum; measured in few matches). How far each field can be relied
 on: `rule`, `stage_id`, `win_team`, the teams' paint and share, every player's team, kills, assists, deaths,
 specials, paint, disconnected, weapon: read from the record the game shows on its result screens, equal in every
 player's file (the shared outcome); `count`, `gear`: measured on few matches; `deemed_result` (-1 in every match run)
@@ -573,6 +573,7 @@ on to a match server as it is. `"format": "splat3-match-options", "version": 1`;
 | `results_hold` | bounds and default |
 | `loadout` | `"profile"`: a player's weapon and gear come from its save (the launcher's `KLM_SAVE_PROFILE` before the start); the result reports each player's |
 | `match_loadout` | `KLM_MATCH_LOADOUT` works: `{"setting", "format": "save_profile", "fields": ["weapon", "gear"], "player_save_written": false, "progress_kept": false, "checked_in_result": true}` ([The match's save](#the-matchs-save)) |
+| `capabilities` | names of what this engine does beyond the members above; a launcher shows a feature only when its name is listed. `gear-abilities`: a save profile's `gear_abilities` and `chunks` are applied ([save-profile.md](save-profile.md)) |
 | `result` | the result file's version, outcomes (`completed`, `aborted`, `spectated`) and `seat` (the file has one) |
 
 A new member may appear in a later version; a member's meaning does not change within a version.

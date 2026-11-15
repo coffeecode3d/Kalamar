@@ -28,6 +28,15 @@ The **advanced mode** (Settings > Advanced mode, `ui.advanced` in `config.json`)
 
 The rail holds Play, Locker, Community (only once a server is added) and Settings, and the player card.
 
+### Locker
+
+Tabs for the character, gear, weapon and splashtag, a side card with the name and the "At launch" options. Under the
+chosen piece of the Gear tab, three slot buttons show its sub-abilities (icon and name, or "Empty"); a slot opens a
+picker with every ability a sub slot can hold, "Empty" and the "Fill all three with this ability" shortcut, and "Clear"
+empties the three. The editor and the "Full stock of ability chunks" option appear only when the installed game applies
+them, else one line asks for the game update ([game-data.md](game-data.md), "Sub-abilities and ability chunks").
+`npm run dev:mock` shows it (`?gear=old`: the update line, `?gear=none`: nothing).
+
 ### Play
 
 One main block: the state in one sentence and one button (Install, Play, or Back to the game + Stop; a game update
@@ -56,6 +65,15 @@ during a room, a search or a match (`src/servers/switch.ts`, used by the Play sc
 Settings). A relay-only server's Community page is the private match by code. What the page does with a server is
 described in [community-client.md](community-client.md).
 
+### Update prompts (every page)
+
+A bar at the top of the content area (`src/update/UpdateBar.tsx`, rules in `prompt.ts`) shows the launcher's own
+update on every page, in every state (available, downloading, ready, waiting for a game or an installation, failed,
+result), then, when there is none, the game's update ("Game update available" / "Game update needed") on every page but
+Play, which carries it in full. A dialog asks once per run of the launcher, when it is idle. "Later" lasts until the
+next start and leaves a dot on the Settings entry. During a match the bar is one compact line and no dialog opens. The
+rules and the texts are in [releasing.md](releasing.md), section 1.
+
 ### Settings
 
 Mouse and aim, keyboard and controller, display, language, servers, installed game, advanced mode, about; local
@@ -83,7 +101,9 @@ chooses the situation, for example:
 - the stage draft: `&match=draft&ds=you|them|vote|timeout|random|done|mode|auto` (`mock/draft.ts`);
 - an install at a given point: `&install=running&ist=early|merge|compile|link|waitgame` (`&iupd=1`: an update of a
   playable game; `&tasks=some|all`, `&profile=empty`);
-- a game update: `&upd=short|long|full` (`&atclose=1`);
+- a game update: `&upd=short|long|full` (`&atclose=1`), on the update bar of the other pages;
+- the launcher's own update: `&lup=available|downloading|ready|blocked|relay|later|…` and `&dlg=0` (without it the start
+  dialog opens after 1.5 s), see [releasing.md](releasing.md), section 6;
 - `?gallery=stages`: the stage cards in every state, on made-up pictures drawn as gradients.
 
 `backend.ts` lists them all. `npm run shots -- --out <folder> --lang fr,es,ja` captures every screen of

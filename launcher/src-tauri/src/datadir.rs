@@ -781,7 +781,7 @@ mod tests {
         fn fill_old(&self, game_inside: bool) {
             let o = self.old();
             let esc = |p: &Path| p.display().to_string().replace('\\', "\\\\");
-            let root = if game_inside { o.join("game").join("work").join("splatoon3-11.2.0") } else { self.base.join("Kalamar").join("work").join("splatoon3-11.2.0") };
+            let root = if game_inside { o.join("game").join("work").join(crate::installer::GAME_DIR) } else { self.base.join("Kalamar").join("work").join(crate::installer::GAME_DIR) };
             let install = root.parent().unwrap().parent().unwrap().to_path_buf();
             std::fs::create_dir_all(o.join("online").join("abc123")).unwrap();
             std::fs::create_dir_all(o.join("game-cache").join("k")).unwrap();
@@ -895,7 +895,7 @@ mod tests {
         assert_eq!(without_paths(snapshot(&t.new_dir())), without_paths(before));
         let c = cfg(&t.new_dir());
         assert_eq!(c["relay_exe"], t.new_dir().join("tools").join("relay.exe").display().to_string());
-        assert_eq!(c["root"], t.base.join("Kalamar").join("work").join("splatoon3-11.2.0").display().to_string(), "a path elsewhere is left alone");
+        assert_eq!(c["root"], t.base.join("Kalamar").join("work").join(crate::installer::GAME_DIR).display().to_string(), "a path elsewhere is left alone");
         assert!(std::fs::read_to_string(t.new_dir().join("last_launch.json")).unwrap().contains(&format!("{}/runtime-src", t.new_dir().display().to_string().replace('\\', "/"))));
         assert!(!t.new_dir().join(JOURNAL).exists() && t.new_dir().join(RECORD).is_file());
         // the next start: in place
@@ -1010,7 +1010,7 @@ mod tests {
         assert_eq!(std::fs::read_dir(t.old()).unwrap().count(), 1, "only the installation is left");
         assert_eq!(without_paths(snapshot(&t.new_dir())), rest_before);
         let c = cfg(&t.new_dir());
-        assert_eq!(c["root"], t.old().join("game").join("work").join("splatoon3-11.2.0").display().to_string(), "the configuration still points at the game where it is");
+        assert_eq!(c["root"], t.old().join("game").join("work").join(crate::installer::GAME_DIR).display().to_string(), "the configuration still points at the game where it is");
         assert_eq!(c["install"]["dir"], t.old().join("game").display().to_string());
         assert_eq!(c["relay_exe"], t.new_dir().join("tools").join("relay.exe").display().to_string());
         assert!(!t.roots.staging().exists());

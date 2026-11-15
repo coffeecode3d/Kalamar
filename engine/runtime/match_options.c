@@ -19,6 +19,7 @@
 #include "json_esc.h"
 #include "restbl.h"
 #include "save_profile.h"
+#include "splat3_addr.h"
 
 // ---- MSBT (a message file): labels (LBL1) to UTF-16 texts (TXT2), tags dropped, as UTF-8
 typedef struct { const uint8_t *p; size_t n; const char *want; char *out; size_t cap; int found; } MsgFind;
@@ -88,9 +89,9 @@ int list_match_options(void) {
     const char *lang = cfg_get("SPLAT3_LIST_LANG");
     if (!lang || !*lang) lang = "USen";
     fs_init();
-    // the labels: Mals/<lang>.Product.b20.sarc.zs, a zstd-compressed SARC of message files
+    // the labels: Mals/<lang>.Product.<tag>.sarc.zs (the tag: splat3_addr.h), a zstd-compressed SARC of message files
     char rel[96];
-    snprintf(rel, sizeof rel, "Mals/%s.Product.b20.sarc.zs", lang);
+    snprintf(rel, sizeof rel, "Mals/%s.Product.%s.sarc.zs", lang, splat3_romfs_tag());
     size_t zn = 0;
     void *z = romfs_read_original_file(rel, &zn);
     unsigned long long raw = z ? ZSTD_getFrameContentSize(z, zn) : 0;
@@ -177,6 +178,9 @@ int list_match_options(void) {
                " \"loadout\": \"profile\",\n"
                " \"match_loadout\": {\"setting\": \"SPLAT3_MATCH_LOADOUT\", \"format\": \"save_profile\", \"fields\": "
                "[\"weapon\", \"gear\"], \"player_save_written\": false, \"progress_kept\": false, \"checked_in_result\": true},\n"
+               // What this engine can do beyond the fields above, by name: a launcher shows a feature only when it
+               // is listed. gear-abilities: a save profile's gear_abilities and chunks are applied (save-profile.md).
+               " \"capabilities\": [\"gear-abilities\"],\n"
                " \"result\": {\"version\": 2, \"outcomes\": [\"completed\", \"aborted\", \"spectated\"], \"seat\": true}\n}\n");
     rsdb_close(t);
     free(sarc);

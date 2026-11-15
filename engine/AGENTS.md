@@ -8,8 +8,8 @@ area, proof, performance runs): [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What the engine is
 
-A fork of totk-pc-recomp (MIT, [NOTICE](NOTICE)) that targets *Splatoon 3* 11.2.0: target `splatoon3-v1120`,
-executable `splat3.exe`. The upstream's *Tears of the Kingdom* targets (`v121`, `v143`, executable `totk.exe`) are
+A fork of totk-pc-recomp (MIT, [NOTICE](NOTICE)) that targets *Splatoon 3* 11.3.0: target `splatoon3-v1130`,
+executable `splat3.exe` (the 11.2.0 target `splatoon3-v1120` still builds). The upstream's *Tears of the Kingdom* targets (`v121`, `v143`, executable `totk.exe`) are
 still in the code, and many pages and tools were written for them: [docs/agents/](docs/agents/) and
 [docs/pr-review-kit/](docs/pr-review-kit/) come from the upstream and say at their top what was checked on this target.
 Variables are documented as `KLM_*`; the code still names them `TOTK_*` (or `SPLAT3_*`), which the runtime reads after
@@ -52,7 +52,8 @@ is read when there is no `kalamar.ini`.
   them `--exefs` and `--modules main,sdk` for Splatoon 3 (no `subsdk`). A change to those headers also recompiles every
   player's generated code: the top-level [AGENTS.md](../AGENTS.md), rule 8.
 - Code that knows TotK's addresses or data runs for TotK only (`rt_target`, `runtime/host.h`); Splatoon 3's patch
-  table holds spin waits only (`recomp/patches-splatoon3-v1120.txt`).
+  tables hold spin waits only (`recomp/patches-splatoon3-v1130.txt`, `-v1120.txt`); a new game version is ported
+  with `tools/port_offsets.py`.
 - Graphics bugs: [docs/maxwell.md](docs/maxwell.md) lists the Maxwell behavior the Vulkan path must match.
 - Comments say what the code does and why, in words that stand on their own. Cite this project's code by file and
   function (a line number may follow as a hint) and other projects' code by project, file and function: `refs/` moves,

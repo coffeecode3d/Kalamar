@@ -67,6 +67,24 @@ with tempfile.TemporaryDirectory(prefix='update-merge-', dir=output.parent) as t
                 'this hactool cannot read an NCA inside its NSP (range.patch missing)')
     bad = re.findall(r'.*(?:\(FAIL\)|\(INVALID\)|Failed to|Error:).*', checked)
     print('problem lines:', bad[:10])
+    if any(re.search(r'Level \d \(FAIL\)', l) for l in bad):
+        # The game data does not match its own hashes. An NCA is named after the SHA-256 of its content (the first 16
+        # bytes, in hex): hashing the two Program NCAs tells a damaged dump from another cause, and which file it is.
+        # Only done here, after a failure: it reads both files once more.
+        damaged = []
+        for which, (src, rec, _) in zip(('base', 'update'), inputs):
+            h = hashlib.sha256()
+            with src.open('rb') as f:
+                f.seek(record_offset(rec)); left = rec['size']
+                while left:
+                    chunk = f.read(min(left, 8 << 20))
+                    if not chunk: break
+                    h.update(chunk); left -= len(chunk)
+            ok = left == 0 and rec['name'].lower().startswith(h.hexdigest()[:32])
+            print('content check', which, 'matches its name' if ok else 'DAMAGED', flush=True)
+            if not ok: damaged.append(which)
+        # Exit codes the wizard reads: 41 base damaged, 42 update damaged, 43 both, 40 neither (keys, disk or memory).
+        sys.exit({('base',): 41, ('update',): 42, ('base', 'update'): 43}.get(tuple(damaged), 40))
     require(cp.returncode == 0 and not bad, 'hactool failed; see merge_romfs.log')
     require(all(re.search(rf'Level {i} \(GOOD\)', log) for i in range(6)), 'IVFC levels not all verified')
     image = result / 'romfs.bin'

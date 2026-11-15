@@ -9,6 +9,7 @@
 //   &pop=0 (the servers do not publish their population)
 //   &login=out   &room=host|guest   &ticket=1   &match=found|run|stop|ended   &gs=<game state>
 //   &profile=incomplete|refused   &launchfail=incomplete|error   &pm=wait|fail|results   &wiz=existing
+//   &ver=old (the installed game is the previous game version: "game update needed" on Play and in the community page)
 //   &match=draft&ds=you|them|vote|timeout|random|done|mode|auto (the stage draft, mock/draft.ts); &match=found&ds=waiting
 //   &spect=room|sit|old|watch|players|late|none (the stands, 1.1.7: mock/stands.ts)   &match=done (a decided match)
 //   &match=forfeit&fft=won|lost|team|mate (1.1.11: a ranked match decided by forfeit, a player left it in play: the
@@ -18,9 +19,11 @@
 //   &iwarn=outside_profile,ram_low (warnings of a running install's checks)
 //   &relays=1 (1.1.9: several relays; the Account tab shows their measurement in every state, ending after 3 s)
 //   &stages=none (no game data: no stage pictures or names, the cards are neutral and the room form has its list)
-//   &lup=uptodate|never|available|beta|downloading|ready|blocked|installer|elsewhere|readonly|saved|error|integrity|
-//        untrusted|rate|updated|rolledback|restarting (the launcher's own update; absent: a build without an update
-//        repository, nothing shown)
+//   &lup=uptodate|never|available|beta|downloading|ready|blocked|relay|installer|elsewhere|readonly|saved|error|integrity|
+//        untrusted|rate|updated|rolledback|restarting|later (the launcher's own update; absent: a build without an update
+//        repository, nothing shown; "later": put off, the bar is hidden and the Settings entry has its dot)
+//        &dlg=0 (the dialog that asks once at the start was already answered: the bar alone; without it, the dialog
+//        opens 1.5 s after the page is up and idle)
 //   while it compiles: &ist=early|merge|compile|link|waitgame (how far a running install is: before the merge, the merge
 //        beside the lift (default), the compile with the game data ready, an update putting the new executable in
 //        place, an update waiting for the game to be closed)   &iupd=1 (the running install is an update of a playable
@@ -32,7 +35,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import schemaJson from "../../../src-tauri/resources/settings-schema.json";
 import { emit } from "./event";
-import { STAGE_IDS, catalogue, stagesView } from "./catalogue";
+import { markDialogDone } from "../../update/prompt";
+import { MOCK_SUB_ABILITIES, STAGE_IDS, catalogue, stagesView } from "./catalogue";
 import { mockDraft, mockDraftAct, mockDraftMatch } from "./draft";
 import { META_STANDS, OLD_REFUSAL, ROOM_FIELDS, ROOM_STANDS, standsDraft, standsMatch, standsRoom, standsRunner, watchable } from "./stands";
 
@@ -56,9 +60,11 @@ const S = {
   match: q.get("match"),
   gs: q.get("gs") ?? "waiting-for-players",
   profile: q.get("profile"),
+  gear: q.get("gear"),
   launchfail: q.get("launchfail"),
   pm: q.get("pm"),
   wiz: q.get("wiz"),
+  ver: q.get("ver") === "old",
   stages: q.get("stages"),
   ds: q.get("ds"),
   spect: q.get("spect"),
@@ -92,13 +98,13 @@ const RELAY_CAPACITY = {
 };
 
 const now = () => Math.floor(Date.now() / 1000);
-const ROOT = "D:\\Games\\Kalamar\\work\\splatoon3-11.2.0";
+const ROOT = `D:\\Games\\Kalamar\\work\\splatoon3-${S.ver ? "11.2.0" : "11.3.0"}`;
 const DIR = "D:\\Games\\Kalamar";
 const fail = (kind: string, message = "", details: string[] = []) => ({ kind, message, details, fields: [] });
 
 // ---- configuration ------------------------------------------------------------------------------------------------
 const config: any = {
-  root: ROOT, translator: null, language: S.lang, lan_enabled: S.adv, apply_profile: true, skip_first_launch: true, unlock_all: true,
+  root: ROOT, translator: null, language: S.lang, lan_enabled: S.adv, apply_profile: true, skip_first_launch: true, unlock_all: true, unlock_chunks: false,
   lan: { mode: "lan", relay_host: "", relay_port: 47313, room: "", net_log: false, bind_any: false, lan_address: "" },
   relay_exe: null, relay_port: 47313, second_name: "Player2", second_dir: "userdata-p2", match_server: "",
   game_lang_follow: S.glfollow,
@@ -167,10 +173,11 @@ function peek(): any[] {
 
 // ---- profile ------------------------------------------------------------------------------------------------------
 let profile: any = S.profile === "empty"
-  ? { schema: 1, name: "", style: null, skin: null, eyes: null, hair: null, eyebrows: null, legwear: null, legwear_variation: null, head: null, clothes: null, shoes: null, weapon: null, banner: null, title: { adjective: null, subject: null }, badges: [null, null, null] }
+  ? { schema: 1, name: "", style: null, skin: null, eyes: null, hair: null, eyebrows: null, legwear: null, legwear_variation: null, head: null, clothes: null, shoes: null, weapon: null, banner: null, title: { adjective: null, subject: null }, badges: [null, null, null], sub_abilities: { head: null, clothes: null, shoes: null } }
   : {
     schema: 1, name: "Mira", style: 1, skin: 3, eyes: 5, hair: S.profile === "incomplete" ? null : 2, eyebrows: 1, legwear: S.profile === "incomplete" ? null : 3, legwear_variation: 1,
     head: 4, clothes: 9, shoes: 2, weapon: 7, banner: 5, title: { adjective: 2, subject: 4 }, badges: [3, null, 11],
+    sub_abilities: { head: ["a0", "a2", "a2"], clothes: ["a1", null, null], shoes: null },
   };
 
 function preflight(): any {
@@ -242,8 +249,8 @@ function wizardInfo(): any {
     request: { install_dir: DIR, base_nsp: "D:\\Files\\base-game.nsp", update_nsp: "D:\\Files\\update.nsp", prod_keys: "D:\\Files\\prod.keys", jobs: 0, allow_prereqs: false, force_rebuild: false, free_build_files: false, low_priority: false },
     pending: S.install === "pending", snapshot: snap, bundle: { commit: "4cb0304a1e9f6b2d", files: 1834, bytes: 42_000_000, sha256: "" },
     bundle_error: null, default_jobs: 8, cpus: 16, ram: 32 * 2 ** 30, state_finished: ready ? true : null, needs_reboot: false, last_error: null,
-    existing: S.wiz === "existing" || ready ? [{ dir: DIR, kind: "wizard", game_root: ROOT, exe: ready || S.wiz === "existing", exefs: true, romfs: true, lift: true, objects: true, xlate: true, venv: true, source: "0c924ab", launcher_data: null, needs_files: false, previous: true, saves: true }] : [],
-    interrupted_step: S.install === "pending" ? "compile" : null, recovered: [],
+    existing: S.wiz === "existing" || ready ? [{ dir: DIR, kind: "wizard", game_root: ROOT, exe: ready || S.wiz === "existing", exefs: true, romfs: true, lift: true, objects: true, xlate: true, venv: true, source: "0c924ab", launcher_data: null, needs_files: S.ver, previous: !S.ver, saves: true, old_version: S.ver ? "11.2.0" : null }] : [],
+    interrupted_step: S.install === "pending" ? "compile" : null, recovered: [], game_version: "11.3.0",
     fresh: { disk_need: 14_000_000_000, footprint: 13_000_000_000, eta: 780, download_bytes: 231_619_695 },
   };
 }
@@ -275,6 +282,7 @@ function plan(): any {
     disk_free: 214e9, disk_needed: S.update ? 3.4e9 : 14.0e9, disk_peak_step: "keys", footprint: 13.0e9, ram: 32 * 2 ** 30, cpus: 16, jobs: 16, source_commit: "4cb0304a1e9f6b2d",
     eta: S.update ? offered.eta : 780, eta_max: S.update ? offered.eta_max : 780, existing: S.update, existing_finished: S.update, foreign: false, needs_files: !S.update, incremental: S.update,
     adopted_from_kit: false, build_files: 0, update: S.update ? updatePreview : null, installed_source: S.update ? "0c924ab" : null,
+    previous_game: S.ver ? "11.2.0" : null, previous_bytes: S.ver ? 14.2e9 : 0,
   };
 }
 function startInstall(): any {
@@ -520,6 +528,7 @@ const LUP_NOTES = [
   "- Details: https://github.com/owner/kalamar/issues/12 (a link is never clickable here)",
 ].join("\n");
 const lupKind = S.lup;
+if (q.get("dlg") === "0") markDialogDone();
 const lup: any = (() => {
   const k = lupKind;
   const on = k !== null && k !== "off";
@@ -530,11 +539,11 @@ const lup: any = (() => {
     last_check: k === "never" ? null : now() - 3 * 3600, checking: false,
     check_error: k === "error" ? "network" : k === "untrusted" ? "untrusted" : k === "rate" ? "rate_limited" : null,
     available: offered ? { version: k === "beta" ? "0.3.0-beta.1" : "0.2.0", channel: k === "beta" ? "beta" : "stable", notes: LUP_NOTES, published: "2026-11-12T10:00:00Z", size: mode === "installer" ? 39_800_000 : 41_900_000, mode, why: k === "readonly" ? "readonly" : mode === "elsewhere" ? "temp" : null } : null,
-    later: false,
-    phase: k === "downloading" ? "downloading" : ["ready", "blocked", "installer", "elsewhere", "readonly", "rolledback"].includes(k!) ? "ready" : k === "saved" ? "saved" : k === "restarting" ? "restarting" : "idle",
+    later: k === "later",
+    phase: k === "downloading" ? "downloading" : ["ready", "blocked", "relay", "installer", "elsewhere", "readonly", "rolledback"].includes(k!) ? "ready" : k === "saved" ? "saved" : k === "restarting" ? "restarting" : "idle",
     progress: k === "downloading" ? { done: 17_600_000, total: 41_900_000 } : null,
     error: k === "integrity" ? "integrity" : null,
-    blocked: k === "blocked" ? "game" : null,
+    blocked: k === "blocked" ? "game" : k === "relay" ? "relay" : null,
     saved_to: k === "saved" ? "D:\\Games\\Kalamar\\Kalamar.exe" : null,
     notice: k === "updated" ? { kind: "updated", from: "0.1.0", to: "0.2.0" } : k === "rolledback" ? { kind: "rolled_back", from: "0.1.0", to: "0.2.0" } : null,
   };
@@ -636,6 +645,7 @@ export async function handle(cmd: string, args: any): Promise<any> {
     // Before a running install's merge is complete the Locker has only the neutral list.
     case "profile_catalogue": return snap.active && !snap.game_data ? { ...catalogue(), origin: "neutral", reason: "the game data is not merged yet" } : catalogue();
     case "gamedata_stages": return stagesView(S.stages === "none");
+    case "gear_abilities_info": return S.gear === "old" ? { supported: false, update_needed: true, abilities: [] } : S.gear === "none" ? { supported: false, update_needed: false, abilities: [] } : { supported: true, update_needed: false, abilities: MOCK_SUB_ABILITIES };
     case "profile_load": return profile;
     case "profile_save": profile = { ...args.profile }; return profile;
     case "gamedata_icon_cache": return { files: 1832, bytes: 61_000_000, warming: false, dir: "C:\\Users\\user\\AppData\\Roaming\\dev.kalamar.launcher\\icons" };
@@ -651,7 +661,8 @@ export async function handle(cmd: string, args: any): Promise<any> {
     case "lan_generate_room": return "QX7-PLAZA-42";
     case "installer_info": endSoon(); return wizardInfo();
     case "installer_status": return snap;
-    case "installer_update_check": return { install_dir: DIR, available: S.update, installed_source: "0c924ab", bundled_commit: "4cb0304a1e9f", redo: updatePreview.lift ? ["lift", "compile"] : ["compile"], update: S.update ? updatePreview : null, eta: offered.eta, eta_max: offered.eta_max, at_close: atClose };
+    case "installer_update_check": if (S.ver) return { install_dir: DIR, available: true, installed_source: "0c924ab", bundled_commit: "4cb0304a1e9f", redo: ["lift", "compile", "keys"], update: null, eta: 780, eta_max: 780, at_close: false, game_from: "11.2.0", game_to: "11.3.0", disk_need: 14e9, old_bytes: 14.2e9 };
+      return { game_from: null, game_to: "11.3.0", disk_need: 0, old_bytes: 0, install_dir: DIR, available: S.update, installed_source: "0c924ab", bundled_commit: "4cb0304a1e9f", redo: updatePreview.lift ? ["lift", "compile"] : ["compile"], update: S.update ? updatePreview : null, eta: offered.eta, eta_max: offered.eta_max, at_close: atClose };
     case "installer_at_close": atClose = !!args.request; return atClose;
     case "notify_attention": return false;
     case "installer_check_file": return { status: "ok", code: args.kind === "keys" ? "keys_ok" : args.kind === "base" ? "base_ok" : "update_ok", params: [["count", "142"]], size: 6e9, program_size: 1e8 };
@@ -669,7 +680,9 @@ export async function handle(cmd: string, args: any): Promise<any> {
     case "proto_request": return request(args.method, args.path, args.body);
     case "proto_runner": return runner();
     case "proto_engine": return { listed: true, note: null, caps: { contract_versions: [1, 2], rounds: true }, names: { stages: S.stages === "none" ? {} : { Vss_Docks00: "Les Docks" }, modes: {} } };
-    case "proto_game_check": return { level: "ok", outdated: false, installed_commit: "4cb0304", bundled_commit: "4cb0304", note: null };
+    case "proto_game_check": return S.ver
+      ? { level: "too_old", outdated: true, installed_commit: "4cb0304", bundled_commit: "4cb0304", note: null, old_version: "11.2.0", needed_version: "11.3.0" }
+      : { level: "ok", outdated: false, installed_commit: "4cb0304", bundled_commit: "4cb0304", note: null, old_version: null, needed_version: "11.3.0" };
     case "proto_discover": return { kind: "service", preview: { name: "Open Ink", description: meta.description, api: "https://openink.example.org/api", api_host: "openink.example.org", typed_host: null, relay: "relay.openink.example.org:47313", operator_name: "Open Ink Association", operator_contact: null, region: "EU", languages: ["fr", "en"], rules_url: null, privacy_url: null, rules_summary: {}, features: FEATURES, features_mismatch: false, compat: { ok: true, reason: null, version: "1.1.3" }, insecure_loopback: false, providers: [] } };
     case "proto_set_background": case "proto_disconnect": case "proto_forget": case "proto_pick_loadout": case "proto_open_link": return null;
     case "proto_confirm_launch": S.match = args.start ? "run" : "ended"; return null;

@@ -439,7 +439,47 @@ fn rate_limits_and_missing_releases_are_quiet() {
     rt.block_on(u.check(Channel::Stable, true, &|| {}));
     let v = u.view(&prefs(), None);
     assert_eq!((v.available, v.check_error, v.last_check.is_some()), (None, None, true));
-    assert!(!u.due(crate::util::now_secs()), "checked: not due again for a day");
+}
+
+#[test]
+fn the_check_cadence_is_every_start_then_every_six_hours() {
+    assert_eq!(auto_wait(true), Duration::from_secs(20));
+    assert_eq!(auto_wait(false), Duration::from_secs(6 * 3600));
+}
+
+#[test]
+fn a_check_at_every_start_costs_a_conditional_request() {
+    let s = setup("everystart");
+    s.release(NEW, &[("Kalamar.exe", "portable", &s.new)]);
+    let rt = rt();
+    let u = s.updater(CUR, vec![]);
+    rt.block_on(u.check(Channel::Stable, false, &|| {}));
+    drop(u);
+    // the launcher is started again right away (a new Updater reads what the first kept on disk): it checks again,
+    // with the ETag, and the verified manifest is not fetched again
+    let u = s.updater(CUR, vec![]);
+    assert!(u.view(&prefs(), None).available.is_some(), "the stored offer is back at once");
+    rt.block_on(u.check(Channel::Stable, false, &|| {}));
+    let latest = s.web.requests(&format!("/api/repos/{REPO}/releases/latest"));
+    assert_eq!(latest.len(), 2);
+    assert_eq!(latest[1].header("If-None-Match"), Some("\"etag-1\""));
+    assert_eq!(s.assets.requests(&format!("/a/v{NEW}/{}", manifest::MANIFEST_NAME)).len(), 1);
+}
+
+#[test]
+fn later_holds_for_this_run_only() {
+    let s = setup("later");
+    s.release(NEW, &[("Kalamar.exe", "portable", &s.new)]);
+    let rt = rt();
+    let u = s.updater(CUR, vec![]);
+    rt.block_on(u.check(Channel::Stable, false, &|| {}));
+    assert!(!u.view(&prefs(), None).later);
+    u.later();
+    assert!(u.view(&prefs(), None).later);
+    drop(u);
+    let u = s.updater(CUR, vec![]);
+    let v = u.view(&prefs(), None);
+    assert!(v.available.is_some() && !v.later, "a new start shows it again");
 }
 
 #[test]
