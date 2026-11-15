@@ -284,7 +284,7 @@ static struct {
     // Scene data for the FSR provider (vk_fsr4.c): this frame's view-projection, depth target and the jitter used.
     float fsr_vp[16];
     int fsr_vp_ok;
-    VkImage fsr_depth;
+    VkImage fsr_depth, fsr_color;   // the scene's depth and colour targets: what the jitter moves (a frame's draws)
     VkFormat fsr_depth_fmt;
     uint32_t fsr_w, fsr_h;
     float fsr_jx, fsr_jy;
@@ -852,7 +852,12 @@ static int ended_at(const VkExec *ex) {
 }
 
 void vk_dlaa_viewport(VkExec *ex, VkViewport *v) {
-    if (!D.jit_ok || !ex->depth.image || ex->depth.image != D.jdepth || ended_at(ex)) return;
+    // The scene's 3D draws and whatever the game composites into the same picture (its HUD, menus, the result of its own
+    // scaling pass) must all take the same subpixel offset: a draw that skips it lands half a pixel off the frame the
+    // upscaler is told about, and its history then wobbles while the camera moves.
+    int scene = (ex->depth.image && ex->depth.image == D.jdepth) ||
+                (D.fsr_color && ex->color[0].image == D.fsr_color);
+    if (!D.jit_ok || !scene || ended_at(ex)) return;
     v->x += D.jx, v->y += D.jy;
     D.ux = D.jx, D.uy = D.jy;
     D.fsr_jx = D.jx, D.fsr_jy = D.jy;
@@ -907,6 +912,7 @@ void vk_dlaa_draw(VkExec *ex) {
         const VkExecTarget *z = &ex->depth;
         if (z->image && z->format == VK_FORMAT_D32_SFLOAT && z->width >= DLAA_SCENE_MIN_W) {
             D.jdepth = z->image;
+            if (ex->color[0].image) D.fsr_color = ex->color[0].image;
             D.jit_ok = 1;
             // one Halton phase a presented frame: the provider stacks 16 subpixel samples into its history
             static uint64_t last;
