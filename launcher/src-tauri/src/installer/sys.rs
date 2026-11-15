@@ -19,6 +19,16 @@ pub fn no_window(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// Environment an AppImage's wrapper leaves in the launcher that must not reach the programs it runs: `PYTHONHOME`
+/// and `PYTHONPATH` point at the AppImage's own tree (no Python there), and `LD_LIBRARY_PATH` at its bundled GTK
+/// libraries. The build tools and the game use the system's.
+pub fn clean_child_env(cmd: &mut Command) {
+    cmd.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
+    if std::env::var_os("APPDIR").is_some() {
+        cmd.env_remove("LD_LIBRARY_PATH").env_remove("LD_PRELOAD");
+    }
+}
+
 /// `CREATE_NO_WINDOW`, plus below-normal priority when asked (inherited by every process the command starts).
 /// On Linux the command gets its own process group, so cancelling can kill the whole tree (Python, Ninja, clang, git,
 /// dotnet) with one signal, and `nice` lowers its priority.

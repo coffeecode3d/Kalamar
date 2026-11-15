@@ -320,6 +320,8 @@ impl GameManager {
         let mut cmd = Command::new(&spec.exe);
         cmd.args(&spec.args).current_dir(&spec.cwd).stdin(Stdio::null()).stdout(out).stderr(err);
         apply_env(&mut cmd, &spec.env_remove, &spec.env);
+        #[cfg(not(windows))]
+        crate::installer::sys::clean_child_env(&mut cmd);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

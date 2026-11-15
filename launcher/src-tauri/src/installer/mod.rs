@@ -1602,6 +1602,7 @@ impl Run {
         if let Ok(p) = std::env::join_paths(dirs) {
             cmd.env("PATH", p);
         }
+        sys::clean_child_env(cmd);
         cmd.env_remove("PYTHONPATH").env_remove("PYTHONHOME").env("PYTHONNOUSERSITE", "1");
         cmd.env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
             .env("DOTNET_NOLOGO", "1")

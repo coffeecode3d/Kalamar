@@ -31,6 +31,7 @@ pub fn msys_packages() -> Vec<String> {
 pub fn run_capture(exe: &Path, args: &[&str], timeout: Duration) -> Option<(i32, String)> {
     let mut cmd = Command::new(exe);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    sys::clean_child_env(&mut cmd);
     sys::no_window(&mut cmd);
     let mut child = cmd.spawn().ok()?;
     let out = child.stdout.take();
