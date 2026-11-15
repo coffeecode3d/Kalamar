@@ -146,9 +146,11 @@ int vk_fsr4_init(void) {
     provider_path(path, sizeof path);
     if (!path[0] || !plat_file_exists(path)) {
 #if defined(_WIN32)
-        rt_log("fsr4: no amd_fidelityfx_loader_vk.dll next to the executable (upscaler stays FSR 1)");
+        rt_log("fsr4: no amd_fidelityfx_loader_vk.dll next to the executable (looked for %s): FSR 1 for now; a runtime "
+               "added later needs a restart", path[0] ? path : "?");
 #else
-        rt_log("fsr4: no amd_fidelityfx_upscaler_vk.so next to the executable (upscaler stays FSR 1; KLM_FSR4=<path>)");
+        rt_log("fsr4: no amd_fidelityfx_upscaler_vk.so at %s: FSR 4.1/3.1 falls back to FSR 1 (set KLM_FSR4=<path> to "
+               "point at one); a runtime added later needs a restart", path[0] ? path : "?");
 #endif
         return 0;
     }

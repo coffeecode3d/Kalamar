@@ -160,7 +160,12 @@ int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, 
                   VkImage dst, const int out[4]) {
     int cw = crop[2], ch = crop[3];
     uint32_t dw = (uint32_t)out[2], dh = (uint32_t)out[3];
-    if (strcmp(cfg_value("TOTK_UPSCALER"), "fsr") || (dw <= (uint32_t)cw && dh <= (uint32_t)ch) || !fmt) return 0;
+    // fsr4 and fsr3 reach this pass when the FidelityFX provider is missing (no file next to the executable), refused
+    // the frame, or the picture cannot be upscaled this way: a spatial upscale is closer to what was picked than the
+    // bilinear blit, and the overlay names what actually ran.
+    const char *up = cfg_value("TOTK_UPSCALER");
+    if (!up || (strcmp(up, "fsr") && strcmp(up, "fsr4") && strcmp(up, "fsr3"))) return 0;
+    if ((dw <= (uint32_t)cw && dh <= (uint32_t)ch) || !fmt) return 0;
     VkCtx *c = vk_ctx();
     if (!F.tried) init(c);
     if (!F.ok || !ensure_images(c, dw, dh)) return 0;
