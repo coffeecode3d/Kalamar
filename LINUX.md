@@ -108,6 +108,18 @@ KALAMAR_APPDATA=/tmp/kalamar-dev npx tauri dev
 cd src-tauri && cargo test --lib
 ```
 
+## Frame rate
+
+Splatoon 3 ships at 30 fps in the hub and menus and 60 in matches. The engine has a `fps60` patch set for 11.3.0 that
+switches the game's own 60 fps mode on for those screens as well — normal speed, verified at 60.0 fps in the hub — and
+the `fps_limit` setting (`kalamar.ini`, or Esc › Display in the game) chooses it: **60** enables the set, **30** turns
+it off. Above 60 the engine needs the real-time frame step, which this game has no patch for yet, so higher limits are
+reduced to 60 and the log says so.
+
+The patch comes from the public Switch patch set by theboy181 (switch-ptchtxt-mods) and was re-verified here against
+11.3.0. Treat frame-rate patches as offline features: a server cannot see a client's render rate, but a modified game
+is outside what community servers promise.
+
 ## Status
 
 The back end compiles and its tests pass on x86-64 Linux; the wizard's Linux steps follow the engine's documented
