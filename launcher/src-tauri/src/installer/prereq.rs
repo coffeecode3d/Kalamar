@@ -356,17 +356,37 @@ fn dotnet_sdk_10() -> bool {
 
 /// A `python3` recent enough for the build tools (3.14+: `compression.zstd` is in the standard library) whose `venv` module works (Debian keeps it in `python3-venv`).
 #[cfg(not(windows))]
-pub fn python_usable() -> bool {
-    on_path("python3").into_iter().next().is_some_and(|p| {
-        run_capture(&p, &["-c", "import sys, venv, ensurepip; print(sys.version_info >= (3, 14))"], T)
-            .is_some_and(|(c, out)| c == 0 && out.trim() == "True")
+/// The `python3` programs to try, the system's own first: a shell session can put a tool environment's older Python
+/// ahead on PATH, and that one is not the interpreter the build needs.
+#[cfg(not(windows))]
+pub fn python3_candidates() -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = ["/usr/bin/python3", "/usr/local/bin/python3"].iter().map(PathBuf::from).collect();
+    for p in on_path("python3") {
+        if !v.contains(&p) {
+            v.push(p);
+        }
+    }
+    v
+}
+
+/// Whether this `python3` runs and is 3.14 or later (`compression.zstd` is in that standard library). `venv` and pip
+/// problems are the Python step's to report, with its log.
+#[cfg(not(windows))]
+fn python_is_new_enough(p: &Path) -> bool {
+    // A single retry covers a spawn that failed because the interpreter was momentarily unavailable.
+    (0..2).any(|_| {
+        run_capture(p, &["-c", "import sys; print(sys.version_info >= (3, 14))"], T).is_some_and(|(c, out)| c == 0 && out.trim() == "True")
     })
 }
 
 #[cfg(not(windows))]
+pub fn python_usable() -> bool {
+    python3_candidates().iter().any(|p| python_is_new_enough(p))
+}
+
+#[cfg(not(windows))]
 pub fn find_python_system() -> Option<PathBuf> {
-    let p = on_path("python3").into_iter().next()?;
-    python_usable().then_some(p)
+    python3_candidates().into_iter().find(|p| python_is_new_enough(p))
 }
 
 #[cfg(not(windows))]

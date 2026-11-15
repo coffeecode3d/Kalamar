@@ -141,6 +141,13 @@ impl Run {
                 self.log("    the system's clang, lld, Ninja and libraries are there (nothing to download)");
                 return Ok(Flow::Skipped);
             }
+            // Say what the interpreter is when Python is the one reported: a spawn that failed leaves no other trace.
+            if missing.contains(&"python")
+                && let Some(p) = prereq::on_path("python3").into_iter().next()
+            {
+                let shown = prereq::run_capture(&p, &["-c", "import sys; print(sys.version)"], Duration::from_secs(10));
+                self.log(&format!("    python3 at {}: {shown:?}", p.display()));
+            }
             return Err(Fail::new("linux_tools_missing").with("list", prereq::missing_packages().join(", ")));
         }
         #[cfg(windows)]
