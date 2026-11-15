@@ -37,7 +37,8 @@ typedef struct VkCtx {
         has_nv_checkpoints,                 // VK_NV_device_diagnostic_checkpoints (TOTK_PASS_CRUMBS=1, vk_crumbs.c)
         has_astc_ldr,                       // textureCompressionASTC_LDR (enabled when reported)
         has_calibrated,                     // VK_KHR/EXT_calibrated_timestamps (GPU idle split in the perf line)
-        has_hdr_metadata;                   // VK_EXT_hdr_metadata (vk_hdr.c vk_hdr_metadata)
+        has_hdr_metadata,                   // VK_EXT_hdr_metadata (vk_hdr.c vk_hdr_metadata)
+        has_descriptor_buffer;              // VK_EXT_descriptor_buffer, the FSR provider's requirement (vk_fsr4.c)
     // Feedback loops (maxwell.md 1.9, vk_exec_draw.c feedback_prepare): a draw samples a target of its open pass that
     // an earlier draw of the pass wrote. TOTK_FEEDBACK=0: VK_FEEDBACK_OFF (sampled in GENERAL without a barrier, the
     // old behaviour); VK_FEEDBACK_LAYOUT with VK_EXT_attachment_feedback_loop_layout and dynamicRenderingLocalRead
@@ -703,3 +704,19 @@ void vk_pipeline_shutdown(void);           // waits for background builds, saves
 int vk_pipeline_selftest(void);            // one graphics and one compute pipeline from census shaders; 0 on success
 
 #include "vk_rec.h"   // last: its macros route the vkCmd* calls of every file that includes vk.h
+
+// AMD FidelityFX upscaler provider (vk_fsr4.c): FSR 4.x / 3.1.x on the present path. init loads the provider when
+// KLM_UPSCALER=fsr4 and the library is present; ready says a context exists.
+int vk_fsr4_init(void);
+int vk_fsr4_ready(void);
+const char *vk_fsr4_version(void);   // the provider's name for the version it runs ("" when it does not say)
+
+// The scene data the FSR provider consumes (vk_dlaa.c): view-projection, depth target, jitter, near/far and the vertical
+// field of view the game's camera uses (radians).
+int vk_dlaa_scene_data(VkImage *depth, VkFormat *fmt, uint32_t *w, uint32_t *h, float vp[16], float *jx, float *jy,
+                       float *near, float *far, float *fov);
+
+// vk_fsr4.c: one FSR 4.x/3.1 frame from the game's picture and the scene's depth/camera. 1: dst holds the upscaled
+// picture (left in TRANSFER_DST); 0: not handled, use vk_fsr_record or the bilinear blit.
+int vk_fsr4_record(VkCommandBuffer cb, VkImage src, VkFormat fmt, int sw, int sh, const int crop[4], VkImage dst,
+                   const int to[4]);

@@ -173,8 +173,11 @@
 # and within a texture heap under 2 GiB (8192x2304 at most on a 5120x1440 output); the log says when it is smaller.
 # Read at start.
 # render_scale = game
-# Scaling to the window when it is larger than the game resolution: fsr (AMD FSR 1) or bilinear, and FSR's sharpening
-# from 0 (off) to 100. Changes while the game runs take effect at once.
+# Scaling to the window when it is larger than the game resolution: fsr4 (AMD FSR 4.1, temporal: the sharpest, needs
+# AMD's FidelityFX upscaler runtime next to the executable, see LINUX.md), fsr3 (FSR 3.1, the same runtime picks the
+# version it can run), fsr (AMD FSR 1, spatial), dlss or dlaa (NVIDIA RTX cards; DLSS uses nvngx_dlss.dll on Windows,
+# libnvidia-ngx-dlss.so.<version> on Linux) or bilinear, and the sharpening from 0 (off) to 100. Changes while the game
+# runs take effect at once.
 # upscaler = fsr
 # sharpness = 80
 # Picture shape when the window's shape differs from the game resolution's (a 16:9 picture in a 21:9 fullscreen

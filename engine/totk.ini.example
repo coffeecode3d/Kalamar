@@ -195,8 +195,10 @@
 # scene wider than about 3000 pixels can drop to 80 % on any GPU. 1 is the default. 1.2.1 and 1.4.3. Changes in
 # the menu take effect at once.
 # dynamic_res = 1
-# Scaling to the window when it is larger than the game resolution: fsr (AMD FSR 1) or bilinear, and FSR's sharpening
-# from 0 (off) to 100. Changes while the game runs take effect at once.
+# Scaling to the window when it is larger than the game resolution: fsr4 (AMD FSR 4.1, temporal: the sharpest, needs
+# AMD's FidelityFX upscaler runtime next to the executable), fsr3 (FSR 3.1, the same runtime picks the version it can
+# run), fsr (AMD FSR 1, spatial), dlss or dlaa (NVIDIA RTX cards: the DLAA row below loads NGX) or bilinear, and the
+# sharpening from 0 (off) to 100. Changes while the game runs take effect at once.
 # upscaler = fsr
 # sharpness = 80
 # Picture shape when the window's shape differs from the game resolution's (a 16:9 picture in a 21:9 fullscreen

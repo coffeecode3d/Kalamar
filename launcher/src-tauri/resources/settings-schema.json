@@ -199,7 +199,11 @@
       "type": "enum",
       "default": "fsr",
       "options": [
+        "fsr4",
+        "fsr3",
         "fsr",
+        "dlss",
+        "dlaa",
         "bilinear"
       ],
       "label": {
@@ -209,10 +213,10 @@
         "ja": "アップスケーラー"
       },
       "help": {
-        "fr": "Utilisée quand la fenêtre est plus grande que la résolution du jeu.",
-        "en": "Used when the window is larger than the game resolution.",
-        "es": "Se usa cuando la ventana es mayor que la resolución del juego.",
-        "ja": "ウィンドウがゲームの解像度より大きいときに使われます。"
+        "fr": "fsr4 : FSR 4.1 (temporel, le plus net ; nécessite le runtime AMD FidelityFX à côté de l'exécutable). fsr3 : FSR 3.1. fsr : FSR 1 (spatial). dlss/dlaa : NVIDIA. bilinear : simple. Utilisée quand la fenêtre est plus grande que la résolution du jeu.",
+        "en": "fsr4: FSR 4.1 (temporal, the sharpest; needs the AMD FidelityFX runtime next to the executable). fsr3: FSR 3.1. fsr: FSR 1 (spatial). dlss/dlaa: NVIDIA. bilinear: plain. Used when the window is larger than the game resolution.",
+        "es": "fsr4: FSR 4.1 (temporal, el más nítido; requiere el runtime AMD FidelityFX junto al ejecutable). fsr3: FSR 3.1. fsr: FSR 1 (espacial). dlss/dlaa: NVIDIA. bilinear: simple. Se usa cuando la ventana es mayor que la resolución del juego.",
+        "ja": "fsr4: FSR 4.1（時間方向、最もシャープ。実行ファイルの隣に AMD FidelityFX ランタイムが必要）。fsr3: FSR 3.1。fsr: FSR 1（空間）。dlss/dlaa: NVIDIA。bilinear: 単純拡大。ウィンドウがゲームの解像度より大きいときに使われます。"
       }
     },
     {

@@ -61,6 +61,7 @@ double frame_step_limit_hz(void);
 extern const int rt_game_version;
 extern const char rt_port_version[];
 int discord_offered(void);
+const char *vk_fsr4_version(void);   // vk_fsr4.c: what the FSR provider runs ("FSR 4.1.1")
 void cheats_frame(uint64_t frame);   // cheats.c
 bool tab_cheats(float scale);        // ui/cheats_tab.cpp; true: restart into the rebuild
 int playtime_get(uint64_t *total_s, uint64_t *session_s);   // playtime.c
@@ -745,8 +746,9 @@ static void tab_screen(float scale) {
     row_render_scale();
     opt_toggle("TOTK_DYNAMIC_RES", UI_MENU_DYNAMIC_RES, UI_MENU_DYNAMIC_RES_DESC);
     row_shadow_res();
-    static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
-    opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
+    static const UiTextId up[] = {UI_MENU_UPSCALER_FSR4, UI_MENU_UPSCALER_FSR3, UI_MENU_UPSCALER_FSR,
+                                  UI_MENU_UPSCALER_DLSS, UI_MENU_UPSCALER_DLAA, UI_MENU_UPSCALER_BILINEAR};
+    opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 6, UI_MENU_UPSCALER_DESC);
     opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
     static const UiTextId aspect[] = {UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH};
     opt_choice("TOTK_ASPECT", UI_MENU_ASPECT, aspect, 2, UI_MENU_ASPECT_DESC);
@@ -1525,8 +1527,9 @@ static void tab_ink_display(float scale) {
         opt_choice("TOTK_VK_PRESENT", UI_MENU_PRESENT, present, 3, UI_MENU_PRESENT_DESC, present_note());
         row_fps_limit();
     } else if (sec == 1) {
-        static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
-        opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
+        static const UiTextId up[] = {UI_MENU_UPSCALER_FSR4, UI_MENU_UPSCALER_FSR3, UI_MENU_UPSCALER_FSR,
+                                      UI_MENU_UPSCALER_DLSS, UI_MENU_UPSCALER_DLAA, UI_MENU_UPSCALER_BILINEAR};
+        opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 6, UI_MENU_UPSCALER_DESC);
         opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
         static const char *const aniso[] = {"game", "2", "4", "8", "16"};
         const char *aniso_names[] = {menu_text(UI_MENU_ANISO_GAME), "2x", "4x", "8x", "16x"};
@@ -2012,12 +2015,16 @@ static void perf_picture(const MenuTarget *t, const ImVec4 &c) {
     snprintf(v[0], sizeof v[0], menu_text(UI_MENU_OV_FMT_SIZE), t->width, t->height);
     snprintf(v[1], sizeof v[1], menu_text(UI_MENU_OV_FMT_SIZE), (unsigned)t->image_w, (unsigned)t->image_h);
     snprintf(v[2], sizeof v[2], menu_text(UI_MENU_OV_FMT_SCENE), scene[0], scene[1], scene[0] * 100.0 / out[0]);
-    if (t->scaler == 2) {
+    if (t->scaler == 3) {
+        // the provider's own name for the version it runs, when it says (FSR 3.1 on a card without 4.x, say)
+        const char *ver = vk_fsr4_version();
+        snprintf(v[3], sizeof v[3], "%s", ver && *ver ? ver : menu_text(UI_MENU_UPSCALER_FSR4));
+    } else if (t->scaler == 2) {
         int s = cfg_int("TOTK_SHARPNESS");
         snprintf(v[3], sizeof v[3], menu_text(UI_MENU_OV_FMT_FSR), s < 0 ? 0 : s > 100 ? 100 : s);
     } else {
         // FSR enlarges only (vk_fsr_record): an image larger than the window is shrunk by the blit even with FSR selected
-        int down = t->scaler == 1 && !strcmp(cfg_value("TOTK_UPSCALER"), "fsr") &&
+        int down = t->scaler == 1 && strstr("fsr4 fsr3 fsr", cfg_value("TOTK_UPSCALER")) &&
                    (t->image_w > (int)t->width || t->image_h > (int)t->height);
         snprintf(v[3], sizeof v[3], "%s",
                  menu_text(down ? UI_MENU_OV_SCALE_DOWN : t->scaler ? UI_MENU_OV_SCALE_BILINEAR : UI_MENU_OV_SCALE_NONE));

@@ -77,9 +77,11 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_DYNAMIC_RES] = "Dynamic resolution",
     [UI_MENU_DYNAMIC_RES_DESC] = "Lets the game lower the 3D scene to 90 or 80 %. It judges by an estimate made for the Switch that ignores your GPU, so wide scenes drop even on a fast PC. Off keeps the render scale.",
     [UI_MENU_UPSCALER] = "Scaling to the window",
-    [UI_MENU_UPSCALER_DESC] = "How the picture is scaled when the window is larger than the game resolution. FSR keeps "
+    [UI_MENU_UPSCALER_DESC] = "How the picture is scaled when the window is larger than the game resolution. FSR 4.1 and 3.1 need AMD's FidelityFX provider next to the executable (FSR 4.1: amd_fidelityfx_upscaler_vk.so); DLSS and DLAA need an NVIDIA RTX GPU and take effect after a restart. FSR keeps "
                               "edges and detail sharper than bilinear.",
-    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_BILINEAR] = "Bilinear",
+    [UI_MENU_UPSCALER_FSR4] = "AMD FSR 4.1", [UI_MENU_UPSCALER_FSR3] = "AMD FSR 3.1",
+    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_DLSS] = "NVIDIA DLSS",
+    [UI_MENU_UPSCALER_DLAA] = "NVIDIA DLAA", [UI_MENU_UPSCALER_BILINEAR] = "Bilinear",
     [UI_MENU_ASPECT] = "Picture shape",
     [UI_MENU_ASPECT_DESC] = "When the window's shape differs from the game resolution's (a 16:9 picture on a 21:9 "
                             "screen): keep the picture's shape with black bars, or stretch it over the window.",
@@ -560,9 +562,12 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_DYNAMIC_RES] = "Динамическое разрешение",
     [UI_MENU_DYNAMIC_RES_DESC] = "Игра снижает 3D-сцену до 90 или 80 %. Она судит по оценке для Switch, не учитывающей вашу видеокарту, поэтому широкие сцены снижаются даже на быстром ПК. Выключено: остаётся масштаб отрисовки.",
     [UI_MENU_UPSCALER] = "Масштабирование под окно",
-    [UI_MENU_UPSCALER_DESC] = "Как картинка растягивается, когда окно больше разрешения игры. FSR сохраняет края и "
-                              "детали чётче билинейного.",
-    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_BILINEAR] = "Билинейное",
+    [UI_MENU_UPSCALER_DESC] = "Как картинка растягивается, когда окно больше разрешения игры. FSR 4.1 и 3.1 нужен "
+                              "runtime AMD FidelityFX рядом с исполняемым файлом; DLSS и DLAA — видеокарта NVIDIA RTX, "
+                              "включение после перезапуска. FSR сохраняет края и детали чётче билинейного.",
+    [UI_MENU_UPSCALER_FSR4] = "AMD FSR 4.1", [UI_MENU_UPSCALER_FSR3] = "AMD FSR 3.1",
+    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_DLSS] = "NVIDIA DLSS",
+    [UI_MENU_UPSCALER_DLAA] = "NVIDIA DLAA", [UI_MENU_UPSCALER_BILINEAR] = "Билинейное",
     [UI_MENU_ASPECT] = "Форма картинки",
     [UI_MENU_ASPECT_DESC] = "Когда форма окна отличается от разрешения игры (картинка 16:9 на экране 21:9): сохранить "
                             "форму картинки с чёрными полосами или растянуть её на всё окно.",
@@ -1082,9 +1087,12 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_DYNAMIC_RES] = "Resolução dinâmica",
     [UI_MENU_DYNAMIC_RES_DESC] = "Deixa o jogo reduzir a cena 3D para 90 ou 80 %. Ele decide por uma estimativa feita para o Switch que ignora sua GPU, então cenas largas caem mesmo num PC rápido. Desligada, mantém a escala da renderização.",
     [UI_MENU_UPSCALER] = "Escala para a janela",
-    [UI_MENU_UPSCALER_DESC] = "Como a imagem é ampliada quando a janela é maior que a resolução do jogo. O FSR mantém "
-                              "bordas e detalhes mais nítidos que o bilinear.",
-    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_BILINEAR] = "Bilinear",
+    [UI_MENU_UPSCALER_DESC] = "Como a imagem é ampliada quando a janela é maior que a resolução do jogo. FSR 4.1 e 3.1 "
+                              "precisam do runtime FidelityFX da AMD junto ao executável; DLSS e DLAA exigem uma GPU "
+                              "NVIDIA RTX e valem após reiniciar. O FSR mantém bordas e detalhes mais nítidos que o bilinear.",
+    [UI_MENU_UPSCALER_FSR4] = "AMD FSR 4.1", [UI_MENU_UPSCALER_FSR3] = "AMD FSR 3.1",
+    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_DLSS] = "NVIDIA DLSS",
+    [UI_MENU_UPSCALER_DLAA] = "NVIDIA DLAA", [UI_MENU_UPSCALER_BILINEAR] = "Bilinear",
     [UI_MENU_ASPECT] = "Formato da imagem",
     [UI_MENU_ASPECT_DESC] = "Quando o formato da janela difere do da resolução do jogo (uma imagem 16:9 numa tela "
                             "21:9): manter o formato da imagem com barras pretas ou esticá-la sobre a janela.",
@@ -1615,9 +1623,11 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_DYNAMIC_RES_DESC] = "让游戏把 3D 场景降到 90 % 或 80 %。它依据为 Switch 制定的估算，不考虑你的显卡，因此即使在高性能 PC 上宽场景也会降低。关闭时保持渲染比例。",
     [UI_MENU_UPSCALER] = "放大到窗口",
     [UI_MENU_UPSCALER_DESC] = "窗口大于游戏分辨率时画面的放大方式。"
-                              "FSR 比双线性更能保留边缘和细节。",
-    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1",
-    [UI_MENU_UPSCALER_BILINEAR] = "双线性",
+                              "FSR 4.1 和 3.1 需要可执行文件旁有 AMD FidelityFX 运行时；DLSS 和 DLAA 需要 NVIDIA RTX "
+                              "显卡，重启后生效。FSR 比双线性更能保留边缘和细节。",
+    [UI_MENU_UPSCALER_FSR4] = "AMD FSR 4.1", [UI_MENU_UPSCALER_FSR3] = "AMD FSR 3.1",
+    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_DLSS] = "NVIDIA DLSS",
+    [UI_MENU_UPSCALER_DLAA] = "NVIDIA DLAA", [UI_MENU_UPSCALER_BILINEAR] = "双线性",
     [UI_MENU_ASPECT] = "画面宽高比",
     [UI_MENU_ASPECT_DESC] = "当窗口宽高比和游戏分辨率不同时（21:9 屏幕上显示 16:9 画面）："
                             "用黑边保持画面比例，或拉伸铺满窗口。",

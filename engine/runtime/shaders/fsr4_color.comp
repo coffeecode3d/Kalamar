@@ -1,0 +1,22 @@
+#version 450
+// The FSR provider takes linear RGBA16F colour; the game's picture is 8-bit. This converts (and optionally
+// linearizes) one 1920x1080 frame for vk_fsr4.c.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D src_tex;
+layout(binding = 1, rgba16f) uniform writeonly image2D dst_img;
+layout(push_constant) uniform P {
+    vec2 size;
+    float srgb;   // 1: apply the sRGB transfer function
+} pc;
+
+vec3 srgb_to_linear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= int(pc.size.x) || p.y >= int(pc.size.y)) return;
+    vec3 c = texelFetch(src_tex, p, 0).rgb;
+    if (pc.srgb > 0.5) c = srgb_to_linear(c);
+    imageStore(dst_img, p, vec4(c, 1.0));
+}

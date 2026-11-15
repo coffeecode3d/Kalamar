@@ -669,9 +669,11 @@ static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w
     VkImage psrc = graded ? graded : src;
     VkFormat pfmt = graded ? VK_FORMAT_R16G16B16A16_SFLOAT : fmt;
     const int *prect = graded ? grect : rect;
+    // FSR 4.x/3.1 first (vk_fsr4.c, when its provider is loaded and the scene's depth and camera are known), then FSR 1
+    int fsr4 = general && vk_fsr4_record(cb, psrc, pfmt, graded ? cw : w, graded ? ch : h, prect, dst, to);
     // FSR (TOTK_UPSCALER) when the picture's rectangle is larger than the crop; else the bilinear blit
-    int fsr = general && vk_fsr_record(cb, slot, psrc, pfmt, graded ? cw : w, graded ? ch : h, prect, dst, to);
-    g_scaler = fsr ? 2 : cw != to[2] || ch != to[3];
+    int fsr = fsr4 || (general && vk_fsr_record(cb, slot, psrc, pfmt, graded ? cw : w, graded ? ch : h, prect, dst, to));
+    g_scaler = fsr4 ? 3 : fsr ? 2 : cw != to[2] || ch != to[3];
     if (!fsr) {
         if (general)   // a GENERAL source (vk_texture.c images): earlier submissions' writes become visible to the blit here
             sync_barrier(cb, psrc, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
