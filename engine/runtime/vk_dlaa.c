@@ -859,33 +859,44 @@ void vk_dlaa_viewport(VkExec *ex, VkViewport *v) {
     __atomic_store_n(&D.jit_used, 1, __ATOMIC_RELAXED);
 }
 
+// The scene inputs the FidelityFX upscaler takes (vk_fsr4.c): the camera block of the scene draws, the depth target they
+// write and the jitter the viewport gave them. Both games' scene blocks hold their view-projection at the same place, rows
+// 3-6 of the block (+0x30, row-major, OpenGL clip depth), so the motion vectors work from one read of it. The near and far
+// planes and the field of view are read where the block has them (Splatoon 3: +0xe0 and the projection at +0x70) and
+// sanity-checked: a block without them keeps the defaults below.
+//
+// The block is written once a frame, but every scene draw carries the same copy; it is read once a frame here because a
+// snapshot lookup per draw cost about 14 ms of replay time a frame (36 fps against 60).
+static void note_fsr_scene(uint64_t cam, const VkExecTarget *z) {
+    if (!cam || !z->image || z->width < DLAA_SCENE_MIN_W || z->format != VK_FORMAT_D32_SFLOAT) return;
+    uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
+    if (f == D.fsr_vp_frame) return;
+    D.fsr_vp_frame = f;
+    D.fsr_depth = z->image, D.fsr_depth_fmt = z->format, D.fsr_w = z->width, D.fsr_h = z->height;
+    const float *vp = (const float *)vk_usnap_bytes(cam + 48, 64);
+    if (vp) memcpy(D.fsr_vp, vp, sizeof D.fsr_vp), D.fsr_vp_ok = 1;
+    const float *nf = (const float *)vk_usnap_bytes(cam + 0xe0, 8);
+    if (nf && nf[0] > 0.0f && nf[1] > nf[0] && nf[1] < 1.0e7f) D.fsr_near = nf[0], D.fsr_far = nf[1];
+    const float *pj = (const float *)vk_usnap_bytes(cam + 0x70, 24);
+    if (pj && pj[5] > 0.0f && pj[5] < 1.0e4f) D.fsr_fov = 2.0f * atanf(1.0f / pj[5]);
+}
+
 // The scene camera: c4 of the last scene draw before the scene ends. A chunked replay's scan notes it in replay order
 // (vk_dlaa_scan_draw): chunks recording side by side would leave the block of whichever drew last.
 static void note_camera(const VkExec *ex) {
     const p_bind_buf *b = &ex->ubo[0][1];   // constant bank c4: the replay keeps user banks from c3 on
     const VkExecTarget *z = &ex->depth;
     if (b->size == 0x940 && b->addr && z->image && z->width >= DLAA_SCENE_MIN_W && z->format == VK_FORMAT_D32_SFLOAT &&
-        (!D.jdepth || z->image == D.jdepth))
+        (!D.jdepth || z->image == D.jdepth)) {
         D.cam_addr = b->addr;
-    // Splatoon 3: the per-frame camera/scene block is c3 (uniform slot 0), 0x920 bytes, its view-projection at +0x30 and
-    // the near and far planes at +0xe0. Every draw that renders into the scene's depth carries it, and it is written once
-    // a frame, so the vectors (vk_fsr4.c) follow the camera: a block read only when it first appeared gave the provider
-    // this frame's matrix for every frame, which reprojected to nothing and smeared everything that moved.
+        note_fsr_scene(b->addr, z);
+    }
+    // Splatoon 3: the camera and scene block is c3 (uniform slot 0), 0x920 bytes.
     const p_bind_buf *b3 = &ex->ubo[0][0];
     if (b3->size == 0x920 && b3->addr && z->image && z->width >= DLAA_SCENE_MIN_W &&
         z->format == VK_FORMAT_D32_SFLOAT) {
         D.cam_addr = b3->addr;
-        D.fsr_depth = z->image, D.fsr_depth_fmt = z->format, D.fsr_w = z->width, D.fsr_h = z->height;
-        uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
-        if (f != D.fsr_vp_frame) {   // the game writes it once a frame: every draw of one frame carries the same copy
-            D.fsr_vp_frame = f;
-            const float *vp = (const float *)vk_usnap_bytes(D.cam_addr + 48, 64);
-            if (vp) memcpy(D.fsr_vp, vp, sizeof D.fsr_vp), D.fsr_vp_ok = 1;
-            const float *nf = (const float *)vk_usnap_bytes(D.cam_addr + 0xe0, 8);
-            if (nf && nf[0] > 0.0f && nf[1] > nf[0]) D.fsr_near = nf[0], D.fsr_far = nf[1];
-            const float *pj = (const float *)vk_usnap_bytes(D.cam_addr + 0x70, 24);
-            if (pj && pj[5] > 0.0f) D.fsr_fov = 2.0f * atanf(1.0f / pj[5]);
-        }
+        note_fsr_scene(b3->addr, z);
         static int once;
         if (!once++) rt_log("upscale: Splatoon camera in c3 (%#llx), view-projection at +0x30", (unsigned long long)b3->addr);
     }
