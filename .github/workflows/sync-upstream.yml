@@ -4,6 +4,10 @@
 # When the merge conflicts, nothing is pushed: the job opens an issue naming the files, and the next run tries again
 # after `linux` has been fixed by hand.
 #
+# GitHub has no trigger for another repository's push or release, so "as soon as upstream pushes" is a poll: the job
+# runs hourly and stops in seconds when `upstream/main` is already in `origin/main`, so a quiet hour costs almost
+# nothing and a busy one lands within the hour. GitHub may start scheduled runs late under load.
+#
 # A push that would change a workflow file (`.github/workflows/...`) is refused to the workflow's own GitHub token.
 # Add a personal access token with the `repo` and `workflow` scopes as the `SYNC_TOKEN` secret to let the sync push
 # those commits too; without it, the job says so in an issue instead of failing silently. account: Settings >
@@ -13,7 +17,7 @@ name: Sync with upstream
 
 on:
   schedule:
-    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+    - cron: "17 * * * *" # hourly, at :17 (GitHub asks schedules to avoid the top of the hour)
   workflow_dispatch:
 
 permissions:
@@ -40,7 +44,18 @@ jobs:
         run: |
           git config user.name "kalamar-sync[bot]"
           git config user.email "kalamar-sync[bot]@users.noreply.github.com"
+      - name: Is there anything new?
+        id: check
+        run: |
+          set -uo pipefail
+          git remote add upstream https://github.com/CyriacFR/Kalamar.git 2>/dev/null || true
+          git fetch --no-tags --quiet upstream main
+          if git merge-base --is-ancestor upstream/main origin/main; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "linux already has everything upstream/main has"
+          fi
       - name: Fast-forward main through GitHub
+        if: steps.check.outputs.stale != 'true'
         env:
           GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
         run: |
@@ -49,6 +64,7 @@ jobs:
             || echo "::warning::main could not be fast-forwarded (it may have commits of its own)"
       - name: Merge upstream into linux
         id: merge
+        if: steps.check.outputs.stale != 'true'
         run: |
           set -uo pipefail
           git remote add upstream https://github.com/CyriacFR/Kalamar.git
