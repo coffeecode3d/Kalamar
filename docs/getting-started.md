@@ -14,9 +14,9 @@ Install the launcher, let it build the game from your own files, play offline. N
 
 ## 1. Install and build
 
-1. Install the launcher. No release is published yet: build it from source as
-   [CONTRIBUTING.md](../CONTRIBUTING.md#building-and-testing-the-launcher) explains (`npm run tauri build` in
-   `launcher/`).
+1. Install the launcher: download `Kalamar.exe` or the installer from the
+   [releases page](https://github.com/CyriacFR/Kalamar/releases). To build it from source instead, see
+   [CONTRIBUTING.md](../CONTRIBUTING.md#building-and-testing-the-launcher) (`npm run tauri build` in `launcher/`).
 2. At first start the install wizard takes the whole window: **Welcome → Your files → What will be installed →
    Install → Done**.
 3. *Your files*: pick the game, the update and the keys file, and an install folder. The wizard checks the update's
@@ -50,12 +50,15 @@ weapon and name card; they are applied to your save when the game starts (a back
 [engine/docs/save-profile.md](../engine/docs/save-profile.md)). Names and icons in the Locker are read from your own
 game files at run time; none are shipped.
 
-In the Gear tab, under the piece you chose, three slots hold its **sub-abilities**: pick a slot, then an ability (or
-*Empty*; tick *Fill all three with this ability* to use it in every slot); *Clear* empties the three. The main ability
-cannot be changed, only some of the game's abilities fit a sub slot, and a piece with sub-abilities shows with 2 stars in
-the game. A server room set to "main abilities only" ignores them. The option *Full stock of ability chunks* (off by
-default) gives you 999 chunks of each of those abilities. Both appear only when your game is recent enough; otherwise the
-Locker says a game update is needed.
+In the Gear tab, under the piece you chose, a slot holds its **main ability** and three slots its **sub-abilities**.
+The main slot shows the piece's own ability until you pick another one; it offers the main abilities that pieces of that
+kind have in the game (some are found only on headgear, clothing or shoes), and *Piece's own main ability* gives the
+original back. For a sub slot, pick a slot, then an ability (or *Empty*; tick *Fill all three with this ability* to use
+it in every slot); *Clear* empties the three. Only some of the game's abilities fit a sub slot, and a piece with
+sub-abilities shows with 2 stars in the game. A server room set to "main abilities only" ignores the sub-abilities but
+keeps the main ability you chose. The option *Full stock of ability chunks* (off by default) gives you 999 chunks of
+each ability that fits a sub slot. Each appears only when your game is recent enough; otherwise the Locker says a game
+update is needed.
 
 Offline means offline: the game opens no network socket. Manual LAN play on one network (or through a relay you name)
 is in the Play screen's *Advanced* drawer; see [engine/docs/lan-play.md](../engine/docs/lan-play.md).

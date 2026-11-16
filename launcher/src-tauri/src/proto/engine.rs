@@ -27,6 +27,9 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(90);
 /// The capability an engine names in the `capabilities` array of its list when its save profile applies the sub
 /// abilities of the equipped gear (`gear_abilities`) and the ability chunk stock (`chunks`).
 pub const CAP_GEAR_ABILITIES: &str = "gear-abilities";
+/// The capability an engine names when its save profile applies the main ability of the equipped gear
+/// (`main_abilities`). An engine built before it ignores that member without a word.
+pub const CAP_MAIN_ABILITIES: &str = "main-abilities";
 /// The automatic match's mode keys before the engine listed its own (contract 1).
 pub const DEFAULT_MODES: &[&str] = crate::proto::contract::MODES;
 
@@ -244,10 +247,17 @@ pub struct Caps {
     /// The engine applies `gear_abilities` and `chunks` of a save profile: its list's `capabilities` names
     /// [`CAP_GEAR_ABILITIES`]. An engine that does not name it may ignore both fields without a word.
     pub gear_abilities: bool,
+    /// The engine applies `main_abilities` of a save profile: its list's `capabilities` names [`CAP_MAIN_ABILITIES`].
+    pub main_abilities: bool,
 }
 
 fn id_text(v: &Value) -> Option<String> {
     v.as_str().map(str::to_string).or_else(|| v.as_i64().map(|n| n.to_string())).filter(|s| (1..=64).contains(&s.len()))
+}
+
+/// Whether the list's `capabilities` array names `cap`.
+fn has_capability(o: &Value, cap: &str) -> bool {
+    o.get("capabilities").and_then(Value::as_array).is_some_and(|a| a.iter().any(|c| c.as_str() == Some(cap)))
 }
 
 /// Capabilities from the engine's list. Contract 2 needs the engine's list (rules for every player, a match id other
@@ -317,7 +327,8 @@ pub fn caps(info: Option<&EngineInfo>) -> Caps {
         },
         rounds_faster: o.pointer("/rounds/faster_than_restart").and_then(Value::as_bool) == Some(true),
         stage_list: if all_stages { "all".into() } else { "host_save".into() },
-        gear_abilities: o.get("capabilities").and_then(Value::as_array).is_some_and(|a| a.iter().any(|c| c.as_str() == Some(CAP_GEAR_ABILITIES))),
+        gear_abilities: has_capability(o, CAP_GEAR_ABILITIES),
+        main_abilities: has_capability(o, CAP_MAIN_ABILITIES),
     }
 }
 
@@ -404,6 +415,22 @@ mod tests {
         assert!(!caps(Some(&info(o))).gear_abilities, "an array is expected");
         assert!(!caps(None).gear_abilities);
         assert_eq!(CAP_GEAR_ABILITIES, "gear-abilities");
+    }
+
+    #[test]
+    fn the_main_abilities_capability_is_read_apart_from_the_sub_abilities_one() {
+        let info = |o: Value| EngineInfo { fingerprint: "f".into(), options: Some(o), room_stages: None, note: None, lang: None };
+        let mut o = sample();
+        o["capabilities"] = json!([CAP_GEAR_ABILITIES]);
+        let c = caps(Some(&info(o.clone())));
+        assert!(c.gear_abilities && !c.main_abilities, "an engine from before main abilities");
+        o["capabilities"] = json!([CAP_GEAR_ABILITIES, CAP_MAIN_ABILITIES]);
+        let c = caps(Some(&info(o.clone())));
+        assert!(c.gear_abilities && c.main_abilities);
+        o["capabilities"] = json!("main-abilities");
+        assert!(!caps(Some(&info(o))).main_abilities, "an array is expected");
+        assert!(!caps(Some(&info(sample()))).main_abilities && !caps(None).main_abilities);
+        assert_eq!(CAP_MAIN_ABILITIES, "main-abilities");
     }
 
     #[test]

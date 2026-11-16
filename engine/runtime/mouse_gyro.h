@@ -19,8 +19,20 @@ typedef struct {
 // The virtual controller: yaw about the world's up axis, pitch about its own right axis (limited), both from the start
 // pose. World axes: x right, y forward, z up. Controller axes (nn::hid): x right, y toward the top edge, z out of the face.
 // carry, last_sign, still: mgyro_frame_yaw's yaw counts waiting, the sign of the last frame that turned, and the frames
-// sent without a turn since.
-typedef struct { double yaw, pitch; double angle[3]; int upright; double carry; int last_sign, still; } MouseGyro;
+// sent without a turn since. followed: degrees of pitch mgyro_frame turned the controller by to follow (below), in all.
+typedef struct {
+    double yaw, pitch;
+    double angle[3];
+    int upright;
+    double carry;
+    int last_sign, still;
+    double followed;
+} MouseGyro;
+
+// A turn of the controller's pitch besides the mouse's (mouse_native.c, while it makes the pitch linear, so the
+// controller follows the view): toward the pitch delta_deg away, or the nearest within span_deg of level, at most
+// rate_deg in one frame; so a controller the mouse took further than span_deg is brought back inside. rate_deg 0: none.
+typedef struct { double delta_deg, rate_deg, span_deg; } MouseGyroFollow;
 
 enum { MOUSE_GYRO_RATE_HZ = 200 };   // the Switch's six-axis rate: one state per 5 ms
 enum { MOUSE_GYRO_GAME_HZ = 60 };    // Splatoon 3 multiplies the newest angular velocity by 1/60 s each frame
@@ -37,14 +49,18 @@ void mgyro_attitude(double yaw, double pitch, int upright, double B[3][3]);
 // over frame_s (1/60), so the game turns by exactly the counts. dx, dy: raw counts (dy > 0 is down); dt: the time since
 // the previous state (its delta_ns). Fills out->{delta_ns, acc, gyro, angle, dir}; the sampling number and attributes
 // are the caller's (motion_push). Angular velocity in revolutions per second, acceleration in G as gravity reads,
-// dir[i * 3 + j] = the j-th world component of controller axis i (the fusion's convention).
-void mgyro_frame(MouseGyro *g, const MouseGyroCfg *c, double dx, double dy, double frame_s, double dt, MotionState *out);
+// dir[i * 3 + j] = the j-th world component of controller axis i (the fusion's convention). follow: NULL or a pitch the
+// controller turns toward after the mouse's counts; that turn is part of the state's angular velocity and adds to
+// g->followed.
+void mgyro_frame(MouseGyro *g, const MouseGyroCfg *c, double dx, double dy, const MouseGyroFollow *follow,
+                 double frame_s, double dt, MotionState *out);
 // A state between the game's reads: the attitude as it is, no angular velocity.
 void mgyro_rest(MouseGyro *g, double dt, MotionState *out);
 // The yaw counts the state of this read carries: dx and the counts waiting, at most lim either way (the game takes a
 // frame's turn modulo a whole turn), the rest waiting for the next read. The game eases a turn that reverses the last
 // one in over about 10 frames unless the controller was still for 2 of its reads (measured: 54% of a 10-frame leg
-// turned); so a reversal is held for hold reads that report the controller still, and then goes out whole.
+// turned); so a reversal is held for hold reads that report the controller still, and then goes out whole. With
+// mouse_native on (mouse_native.c) the game's easing is off while the mouse is the sensor.
 double mgyro_frame_yaw(MouseGyro *g, double dx, double lim, int hold);
 // Degrees of controller turn per count for a PC game's sensitivity: cm of mouse travel per whole turn of the camera at
 // dpi, the game turning game_gain times the controller. 0 for cm360 or dpi not above 0.

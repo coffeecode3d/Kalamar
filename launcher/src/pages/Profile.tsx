@@ -12,6 +12,9 @@ import { GameIcon } from "../grid";
 import { Character } from "./profile/Character";
 import { NeedsGameData, type FieldNoteData } from "./profile/common";
 import { Gear } from "./profile/Gear";
+import { Presets } from "./profile/Presets";
+import { applyPreset, type Preset } from "./profile/presetLogic";
+import { GEAR_PARTS, mainChoices } from "./profile/subSlots";
 import { Splashtag, TagPreview } from "./profile/Splashtag";
 import { Weapon } from "./profile/Weapon";
 
@@ -84,9 +87,12 @@ export default function Profile({ notify }: { notify: (n: Notice | null) => void
   }, [load]);
 
   useEffect(() => { void api.iconCache().then(setCache).catch(() => {}); }, [tab]);
-  // Does the installed game apply sub-abilities? Asked apart from the catalogue: the first answer may run the game's
-  // capability listing (once per executable, no window).
-  useEffect(() => { void api.gearAbilitiesInfo().then(setSubs).catch(() => setSubs({ supported: false, update_needed: false, abilities: [] })); }, []);
+  // Does the installed game apply sub-abilities and main abilities? Asked apart from the catalogue: the first answer may
+  // run the game's capability listing (once per executable, no window).
+  useEffect(() => {
+    void api.gearAbilitiesInfo().then(setSubs)
+      .catch(() => setSubs({ supported: false, update_needed: false, abilities: [], main_supported: false, main_update_needed: false, main_abilities: [] }));
+  }, []);
   // During an installation the game data becomes readable when its merge ends (long before the compile does): the
   // catalogue is read again then, without touching what the player is editing.
   useEffect(() => {
@@ -115,16 +121,27 @@ export default function Profile({ notify }: { notify: (n: Notice | null) => void
     }
   };
 
-  const save = () => wrap(async () => {
-    const s = await api.profileSave(p);
+  const saveProfile = (next: ProfileT, okText = t("profile.saved.launch")) => wrap(async () => {
+    const s = await api.profileSave(next);
     setP(s);
     setSaved(s);
     setNotice(null);
     play("success");
-    notify({ kind: "ok", text: t("profile.saved.launch") });
+    notify({ kind: "ok", text: okText });
     void reloadPlayer();
     void api.playPreflight().then(setPre).catch(() => {});
   });
+  const save = () => saveProfile(p);
+  // A loadout preset is copied into the profile being edited, then saved through the same path as the Save button
+  // (same validation, same feedback). Items the game data no longer has are left as they were.
+  const applyLoadout = (preset: Preset) => {
+    if (!cat) return;
+    const has = (field: "head" | "clothes" | "shoes" | "weapon", id: number) => (cat.categories[field] ?? []).some((e) => e.id === id && e.selectable);
+    const mainAbilities = Object.fromEntries(GEAR_PARTS.map((part) => [part, mainChoices(subs?.main_abilities ?? [], cat.categories[part] ?? [])]));
+    const { profile: next, skipped } = applyPreset(p, preset, { has, subs: !!subs?.supported, abilities: subs?.abilities, main: !!subs?.main_supported, mainAbilities });
+    setP(next);
+    void saveProfile(next, skipped > 0 ? t("presets.applied.partial", { name: preset.name, n: skipped }) : t("presets.applied", { name: preset.name }));
+  };
   const warm = async () => {
     try {
       setProgress({ done: 0, total: 0, failed: 0, running: true });
@@ -222,6 +239,7 @@ export default function Profile({ notify }: { notify: (n: Notice | null) => void
             {dataWait && install && <DataWait eta={install.game_data_eta} fraction={install.background.find((b) => b.id === "romfs")?.fraction ?? null} t={t} />}
             {!dataWait && tabProps && tab === "character" && <Character {...tabProps} />}
             {!dataWait && tabProps && tab !== "character" && !game && <NeedsGameData t={t} reason={view?.reason ?? null} />}
+            {tabProps && game && (tab === "gear" || tab === "weapon") && <Presets cat={tabProps.cat} profile={p} subs={subs} t={t} onApply={applyLoadout} />}
             {tabProps && game && tab === "gear" && <Gear {...tabProps} />}
             {tabProps && game && tab === "weapon" && <Weapon {...tabProps} />}
             {tabProps && game && tab === "splashtag" && <Splashtag {...tabProps} />}

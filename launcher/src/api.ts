@@ -136,11 +136,23 @@ export interface Profile {
   badges: (number | null)[];
   /** Per gear part: null (never edited) or three slots, each an ability name of the game or null (empty). */
   sub_abilities: Record<"head" | "clothes" | "shoes", (string | null)[] | null>;
+  /** Per gear part: null (never chosen: the save keeps the piece's main ability) or an ability name of the game. */
+  main_abilities: Record<"head" | "clothes" | "shoes", string | null>;
 }
+/** A loadout preset (loadouts.json): a name plus the outfit and weapon of a profile. */
+export interface LoadoutPreset {
+  name: string;
+  head: number | null; clothes: number | null; shoes: number | null; weapon: number | null;
+  sub_abilities: Profile["sub_abilities"];
+  /** Absent in a preset saved before main abilities. */
+  main_abilities?: Profile["main_abilities"];
+}
+export type Loadout = Omit<LoadoutPreset, "name">;
 export const EMPTY_PROFILE: Profile = {
   schema: 1, name: "", style: null, skin: null, eyes: null, hair: null, eyebrows: null, legwear: null, legwear_variation: null,
   head: null, clothes: null, shoes: null, weapon: null, banner: null, title: { adjective: null, subject: null }, badges: [null, null, null],
   sub_abilities: { head: null, clothes: null, shoes: null },
+  main_abilities: { head: null, clothes: null, shoes: null },
 };
 
 export interface LanRequest {
@@ -150,8 +162,12 @@ export interface RelayStatus { running: boolean; pid: number | null; port: numbe
 export type ModeId = "hub" | "range" | "lan" | "original";
 export type LaunchedMode = ModeId | "match";
 export interface LaunchOptions { apply_profile: boolean; skip_first_launch: boolean; unlock_all: boolean; unlock_chunks: boolean }
-/** Whether the installed game applies sub-abilities, and which abilities a sub slot can hold (names of the game's enum). */
-export interface GearAbilitiesInfo { supported: boolean; update_needed: boolean; abilities: string[] }
+/** Whether the installed game applies sub-abilities and main abilities, and which abilities a sub slot and a main slot
+ *  can hold (names of the game's enum; which main abilities a part may take is what the game's pieces of that part have). */
+export interface GearAbilitiesInfo {
+  supported: boolean; update_needed: boolean; abilities: string[];
+  main_supported: boolean; main_update_needed: boolean; main_abilities: string[];
+}
 export interface Refusal { field: string; code: string; id: number | null; species: string | null; style: string | null; from_save: boolean; raw: string }
 export interface Feedback {
   state: "applied" | "already" | "new_save" | "restarting" | "needs_appearance" | "failed" | "none";
@@ -233,6 +249,10 @@ export const api = {
   cacheClear: () => call<void>("gamedata_cache_clear"),
   profileLoad: () => call<Profile>("profile_load"),
   profileSave: (profile: Profile) => call<Profile>("profile_save", { profile }),
+  loadoutsList: () => call<LoadoutPreset[]>("loadouts_list"),
+  loadoutsSave: (name: string, loadout: Loadout) => call<LoadoutPreset[]>("loadouts_save", { name, loadout }),
+  loadoutsRename: (from: string, to: string) => call<LoadoutPreset[]>("loadouts_rename", { from, to }),
+  loadoutsDelete: (name: string) => call<LoadoutPreset[]>("loadouts_delete", { name }),
   setMatchServer: (value: string) => call<ConfigView>("set_match_server", { value }),
   matchServerFromCard: (path: string) => call<string>("match_server_from_card", { path }),
   matchCreate: (request: MatchCreateRequest) => call<MatchPlan>("match_create", { request }),

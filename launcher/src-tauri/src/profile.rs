@@ -19,6 +19,10 @@
 //! launcher ignores it) holds, per gear part, the three sub-ability names the player chose, `null` for an empty slot:
 //! `"sub_abilities": {"head": ["NameA", null, "NameA"]}`. A part that is absent was never edited and the save keeps
 //! what it has; a part with three `null` is an explicit "empty", which clears what an earlier launch wrote.
+//!
+//! `main_abilities` (added the same way) holds, per gear part, the main ability name the player chose for the piece worn
+//! there: `"main_abilities": {"head": "NameA", "clothes": null, "shoes": null}`. `null` was never chosen: the save
+//! keeps the piece's main ability as it is (its own, unless an earlier launch changed it). A main slot is never empty.
 
 use crate::error::{AppError, AppResult, FieldError};
 use crate::game::catalogue::Catalogue;
@@ -55,6 +59,35 @@ impl SubAbilities {
     }
 }
 
+/// The main ability the player chose for the piece worn on each part: an ability name (the game's enum name), or
+/// `None` when it was never chosen (the save keeps the piece's main ability as it is).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MainAbilities {
+    pub head: Option<String>,
+    pub clothes: Option<String>,
+    pub shoes: Option<String>,
+}
+
+impl MainAbilities {
+    pub fn part(&self, part: &str) -> Option<&String> {
+        match part {
+            "head" => self.head.as_ref(),
+            "clothes" => self.clothes.as_ref(),
+            "shoes" => self.shoes.as_ref(),
+            _ => None,
+        }
+    }
+
+    fn set(&mut self, part: &str, v: Option<String>) {
+        match part {
+            "head" => self.head = v,
+            "clothes" => self.clothes = v,
+            _ => self.shoes = v,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Title {
@@ -83,6 +116,7 @@ pub struct Profile {
     pub title: Title,
     pub badges: [Option<i64>; BADGE_SLOTS],
     pub sub_abilities: SubAbilities,
+    pub main_abilities: MainAbilities,
 }
 
 impl Default for Profile {
@@ -105,6 +139,7 @@ impl Default for Profile {
             title: Title::default(),
             badges: [None; BADGE_SLOTS],
             sub_abilities: SubAbilities::default(),
+            main_abilities: MainAbilities::default(),
         }
     }
 }
@@ -152,10 +187,18 @@ fn has(cat: &Catalogue, category: &str, id: i64) -> bool {
     cat.categories.get(category).is_some_and(|v| v.iter().any(|e| e.id == id && e.selectable))
 }
 
-/// Validates against the catalogue and returns the cleaned-up profile (current schema, trimmed name). `sub_capable`:
-/// the abilities a sub slot can hold (`game::subs`), when the install's keys file could be read; without it the names
-/// are only checked for shape.
-pub fn validate_profile(p: &Profile, cat: &Catalogue, sub_capable: Option<&[String]>) -> AppResult<Profile> {
+/// The main abilities the game's own pieces of a part have (`Entry::ability` of the part's selectable entries): the
+/// ones a main slot of that part may take. `None` when the catalogue names none (no game data).
+pub fn part_main_abilities(cat: &Catalogue, part: &str) -> Option<std::collections::BTreeSet<String>> {
+    let set: std::collections::BTreeSet<String> = cat.categories.get(part)?.iter().filter(|e| e.selectable).filter_map(|e| e.ability.clone()).collect();
+    (!set.is_empty()).then_some(set)
+}
+
+/// Validates against the catalogue and returns the cleaned-up profile (current schema, trimmed name). `sub_capable`
+/// and `main_capable`: the abilities a sub slot and a main slot can hold (`game::subs`), when the install's keys file
+/// could be read; without them the names are only checked for shape. A main ability must also be one that a piece of
+/// that part has in the game ([`part_main_abilities`]), as the engine requires.
+pub fn validate_profile(p: &Profile, cat: &Catalogue, sub_capable: Option<&[String]>, main_capable: Option<&[String]>) -> AppResult<Profile> {
     let mut errors = Vec::new();
     let name = match validate_name(&p.name) {
         Ok(n) => n,
@@ -217,11 +260,25 @@ pub fn validate_profile(p: &Profile, cat: &Catalogue, sub_capable: Option<&[Stri
             _ => sub_abilities.shoes = Some(clean),
         }
     }
+    let mut main_abilities = MainAbilities::default();
+    for part in GEAR_PARTS {
+        let Some(n) = p.main_abilities.part(part).map(|n| n.trim()).filter(|n| !n.is_empty()) else { continue };
+        let key = format!("main_abilities.{part}");
+        if !crate::game::subs::valid_name(n) {
+            errors.push(FieldError { key, message: "not an ability name".into() });
+        } else if main_capable.is_some_and(|set| !set.iter().any(|s| s == n)) {
+            errors.push(FieldError { key, message: format!("{n} is not an ability a main slot can hold") });
+        } else if part_main_abilities(cat, part).is_some_and(|set| !set.contains(n)) {
+            errors.push(FieldError { key, message: format!("{n} is not the main ability of any {part} piece of the game") });
+        } else {
+            main_abilities.set(part, Some(n.to_string()));
+        }
+    }
     if !errors.is_empty() {
         return Err(AppError::Validation(errors));
     }
     // Badges cannot be applied (see `game::catalogue::apply_save_constraints`): an old selection is dropped.
-    Ok(Profile { schema: PROFILE_SCHEMA, name, badges: [None; BADGE_SLOTS], sub_abilities, ..p.clone() })
+    Ok(Profile { schema: PROFILE_SCHEMA, name, badges: [None; BADGE_SLOTS], sub_abilities, main_abilities, ..p.clone() })
 }
 
 pub fn profile_path(data_dir: &Path) -> PathBuf {
@@ -403,6 +460,19 @@ pub fn to_runtime(p: &Profile, opts: ApplyOptions, save_exists: bool) -> Result<
     if !subs.is_empty() {
         o.insert("gear_abilities".into(), Value::Object(subs));
     }
+    // A main ability goes to the piece chosen for the part, like the sub abilities; a part never chosen is left out
+    // (the save keeps the piece's main ability as it is).
+    let mut mains = Map::new();
+    for (part, piece) in [("head", p.head), ("clothes", p.clothes), ("shoes", p.shoes)] {
+        let (Some(_), Some(name)) = (piece, p.main_abilities.part(part)) else { continue };
+        if !crate::game::subs::valid_name(name) {
+            return Err(ConvertError::Invalid("main_abilities", format!("{part}: not an ability name")));
+        }
+        mains.insert(part.into(), json!(name));
+    }
+    if !mains.is_empty() {
+        o.insert("main_abilities".into(), Value::Object(mains));
+    }
     if opts.unlock_chunks {
         o.insert("chunks".into(), json!("max"));
     }
@@ -527,6 +597,24 @@ pub fn classify_refusal(msg: &str) -> Refusal {
             "sub_not_owned"
         } else {
             "sub_invalid"
+        };
+        return Refusal { field, code: code.into(), id: trailing_id(msg), raw: msg.to_string(), ..Default::default() };
+    }
+    if let Some(rest) = msg.strip_prefix("main_abilities") {
+        // `main_abilities.<part>: ...`, `main_abilities.<part> must be ...`, `main_abilities has an unknown part`,
+        // `main_abilities must be an object`, `main_abilities: the save does not own the equipped gear (...)`.
+        let part = rest.strip_prefix('.').and_then(|r| r.split([' ', ':']).next()).filter(|p| GEAR_PARTS.contains(p));
+        let field = part.map_or_else(|| "main_abilities".to_string(), |p| format!("main_abilities.{p}"));
+        let code = if rest.contains("is not the main ability of any") {
+            "main_part"
+        } else if rest.contains("has no ability named") || rest.contains("is not a value of the game's ability enum") {
+            "main_unknown"
+        } else if rest.contains("does not own the equipped gear") {
+            "main_not_owned"
+        } else if rest.contains("is never empty") {
+            "main_empty"
+        } else {
+            "main_invalid"
         };
         return Refusal { field, code: code.into(), id: trailing_id(msg), raw: msg.to_string(), ..Default::default() };
     }
@@ -692,9 +780,9 @@ mod tests {
     fn profile_validation_reports_each_field() {
         let cat = cat_with_gear();
         let ok = Profile { name: "Kay".into(), style: Some(1), hair: Some(12), head: Some(1000), badges: [Some(7), Some(8), None], ..Default::default() };
-        assert!(validate_profile(&ok, &cat, None).unwrap().badges.iter().all(Option::is_none)); // badges are dropped
+        assert!(validate_profile(&ok, &cat, None, None).unwrap().badges.iter().all(Option::is_none)); // badges are dropped
         let bad = Profile { name: "".into(), hair: Some(99), head: Some(20001), shoes: Some(5), badges: [Some(7), Some(7), Some(404)], title: Title { adjective: Some(1), subject: None }, ..Default::default() };
-        match validate_profile(&bad, &cat, None).unwrap_err() {
+        match validate_profile(&bad, &cat, None, None).unwrap_err() {
             AppError::Validation(v) => assert_eq!(
                 v.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(),
                 vec!["name", "hair", "head", "shoes", "title.adjective"]
@@ -821,9 +909,9 @@ mod tests {
         cat.categories.insert("hair".into(), vec![mk(3, "inkling", None), mk(33, "octoling", None)]);
         cat.categories.insert("legwear".into(), vec![mk(1, "", Some(3))]);
         let ok = Profile { name: "K".into(), style: Some(2), hair: Some(33), legwear: Some(1), legwear_variation: Some(2), ..Default::default() };
-        assert!(validate_profile(&ok, &cat, None).is_ok());
+        assert!(validate_profile(&ok, &cat, None, None).is_ok());
         let bad = Profile { hair: Some(3), legwear_variation: Some(3), ..ok.clone() };
-        match validate_profile(&bad, &cat, None).unwrap_err() {
+        match validate_profile(&bad, &cat, None, None).unwrap_err() {
             AppError::Validation(v) => assert_eq!(v.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), vec!["hair", "legwear_variation"]),
             e => panic!("{e:?}"),
         }
@@ -1030,18 +1118,18 @@ save profile: deleted 2 older backups (the newest 10 are kept)";
         let cat = cat_with_gear();
         let set = vec!["Alpha".to_string(), "Beta".to_string()];
         let ok = Profile { name: "K".into(), head: Some(1000), sub_abilities: SubAbilities { head: slots([Some(" Alpha "), None, Some("Beta")]), ..Default::default() }, ..Default::default() };
-        let clean = validate_profile(&ok, &cat, Some(&set)).unwrap();
+        let clean = validate_profile(&ok, &cat, Some(&set), None).unwrap();
         assert_eq!(clean.sub_abilities.head, slots([Some("Alpha"), None, Some("Beta")]), "names are trimmed");
         let bad = Profile {
             sub_abilities: SubAbilities { head: slots([Some("MainOnly"), None, None]), clothes: Some(vec![None, None]), shoes: slots([Some("a-b"), None, Some("Alpha")]) },
             ..ok.clone()
         };
-        match validate_profile(&bad, &cat, Some(&set)).unwrap_err() {
+        match validate_profile(&bad, &cat, Some(&set), None).unwrap_err() {
             AppError::Validation(v) => assert_eq!(v.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), vec!["sub_abilities.head.0", "sub_abilities.clothes", "sub_abilities.shoes.0"]),
             e => panic!("{e:?}"),
         }
         // without the list (no keys file) the shape is all that can be checked
-        assert!(validate_profile(&Profile { sub_abilities: SubAbilities { head: slots([Some("MainOnly"), None, None]), ..Default::default() }, ..ok }, &cat, None).is_ok());
+        assert!(validate_profile(&Profile { sub_abilities: SubAbilities { head: slots([Some("MainOnly"), None, None]), ..Default::default() }, ..ok }, &cat, None, None).is_ok());
     }
 
     #[test]
@@ -1093,5 +1181,107 @@ save profile: deleted 2 older backups (the newest 10 are kept)";
         // end to end through the log
         let f = parse_log("[x] save profile: gear_abilities.head[1]: ability 104 is one only a main slot has, not a sub slot (0); the save is left as it is");
         assert_eq!((f.state.as_str(), f.refusal.unwrap().code.as_str()), ("failed", "sub_main_only"));
+    }
+
+    // ---- main abilities -----------------------------------------------------------------------------------------
+
+    /// Made-up abilities: every part's pieces have "Alpha" and "Beta" as main ability; "HeadOnly" exists on a head
+    /// piece only and "ShoesOnly" on a shoes piece only; "Unused" is in the enum but on no piece.
+    fn cat_with_mains() -> Catalogue {
+        let mut c = neutral();
+        let piece = |id, ability: &str| Entry { id, selectable: true, ability: Some(ability.into()), ..Default::default() };
+        c.categories.insert("head".into(), vec![piece(1018, "Alpha"), piece(1019, "Beta"), piece(1020, "HeadOnly"), Entry { id: 1021, selectable: false, ability: Some("Hidden".into()), ..Default::default() }]);
+        c.categories.insert("clothes".into(), vec![piece(5001, "Alpha"), piece(5002, "Beta")]);
+        c.categories.insert("shoes".into(), vec![piece(6003, "Beta"), piece(6004, "ShoesOnly")]);
+        c
+    }
+    fn main_set() -> Vec<String> {
+        ["Alpha", "Beta", "HeadOnly", "ShoesOnly", "Unused", "Hidden"].iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn main_abilities_are_emitted_for_the_parts_with_a_piece_and_a_choice() {
+        let mut p = full();
+        p.main_abilities = MainAbilities { head: Some("Alpha".into()), clothes: None, shoes: Some("Beta".into()) };
+        let v = to_runtime(&p, ApplyOptions::default(), true).unwrap();
+        assert_eq!(v["main_abilities"], serde_json::json!({"head": "Alpha", "shoes": "Beta"}), "clothes never chosen: absent");
+        // a part without a chosen piece is left out: the runtime would apply it to whatever the save wears
+        p.head = None;
+        assert!(to_runtime(&p, ApplyOptions::default(), true).unwrap()["main_abilities"].get("head").is_none());
+        // no choice at all: no member
+        assert!(to_runtime(&full(), ApplyOptions::default(), true).unwrap().get("main_abilities").is_none());
+        // the sub abilities are independent of it
+        let mut q = subs_profile();
+        q.main_abilities.clothes = Some("Beta".into());
+        let v = to_runtime(&q, ApplyOptions::default(), true).unwrap();
+        assert_eq!((v["main_abilities"].clone(), v["gear_abilities"]["clothes"].clone()), (serde_json::json!({"clothes": "Beta"}), serde_json::json!([null, null, null])));
+        q.main_abilities.clothes = Some("bad name".into());
+        assert!(matches!(to_runtime(&q, ApplyOptions::default(), true), Err(ConvertError::Invalid("main_abilities", _))));
+    }
+
+    #[test]
+    fn main_abilities_are_validated_against_the_enum_and_the_parts_own_pieces() {
+        let cat = cat_with_mains();
+        let set = main_set();
+        let ok = Profile { name: "K".into(), head: Some(1018), main_abilities: MainAbilities { head: Some(" HeadOnly ".into()), clothes: Some("Alpha".into()), shoes: Some("ShoesOnly".into()) }, ..Default::default() };
+        let clean = validate_profile(&ok, &cat, None, Some(&set)).unwrap();
+        assert_eq!(clean.main_abilities, MainAbilities { head: Some("HeadOnly".into()), clothes: Some("Alpha".into()), shoes: Some("ShoesOnly".into()) }, "names are trimmed");
+        // an empty name is no choice
+        let empty = Profile { main_abilities: MainAbilities { head: Some("  ".into()), ..Default::default() }, ..ok.clone() };
+        assert_eq!(validate_profile(&empty, &cat, None, Some(&set)).unwrap().main_abilities, MainAbilities::default());
+        // another part's own main ability, one no selectable piece has, one outside the enum, a malformed name
+        let bad = Profile { main_abilities: MainAbilities { head: Some("ShoesOnly".into()), clothes: Some("Unused".into()), shoes: Some("Nope".into()) }, ..ok.clone() };
+        match validate_profile(&bad, &cat, None, Some(&set)).unwrap_err() {
+            AppError::Validation(v) => assert_eq!(v.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), vec!["main_abilities.head", "main_abilities.clothes", "main_abilities.shoes"]),
+            e => panic!("{e:?}"),
+        }
+        let hidden = Profile { main_abilities: MainAbilities { head: Some("Hidden".into()), ..Default::default() }, ..ok.clone() };
+        assert!(validate_profile(&hidden, &cat, None, Some(&set)).is_err(), "only the selectable pieces count");
+        let shape = Profile { main_abilities: MainAbilities { head: Some("a-b".into()), ..Default::default() }, ..ok.clone() };
+        assert!(validate_profile(&shape, &cat, None, None).is_err());
+        // without the keys file the part's pieces still decide; without game data only the shape is checked
+        assert!(validate_profile(&bad, &cat, None, None).is_err());
+        assert!(validate_profile(&Profile { head: Some(1000), ..bad.clone() }, &cat_with_gear(), None, None).is_ok());
+        assert_eq!(part_main_abilities(&cat, "shoes").unwrap().into_iter().collect::<Vec<_>>(), ["Beta", "ShoesOnly"]);
+        assert!(part_main_abilities(&cat_with_gear(), "head").is_none());
+    }
+
+    #[test]
+    fn a_profile_saved_before_main_abilities_loads_with_none_chosen() {
+        let d = std::env::temp_dir().join(format!("s3l-main-prof-{}", util::random_hex(4)));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(profile_path(&d), r#"{"schema":1,"name":"Old","head":1000,"sub_abilities":{"head":["Alpha",null,null]}}"#).unwrap();
+        let p = load_profile(&d);
+        assert_eq!((p.name.as_str(), p.main_abilities.clone()), ("Old", MainAbilities::default()));
+        assert_eq!(p.sub_abilities.head, slots([Some("Alpha"), None, None]));
+        let q = Profile { main_abilities: MainAbilities { shoes: Some("Beta".into()), ..Default::default() }, ..p };
+        save_profile(&d, &q).unwrap();
+        assert!(std::fs::read_to_string(profile_path(&d)).unwrap().contains("main_abilities"));
+        assert_eq!(load_profile(&d), q);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_runtimes_main_ability_refusals_are_mapped() {
+        let r = classify_refusal("main_abilities.shoes: ability 105 is not the main ability of any shoes piece of the game (0); the save is left as it is");
+        assert_eq!((r.field.as_str(), r.code.as_str()), ("main_abilities.shoes", "main_part"));
+        let r = classify_refusal("main_abilities.head: the game has no ability named \"Nope\" (0); the save is left as it is");
+        assert_eq!((r.field.as_str(), r.code.as_str()), ("main_abilities.head", "main_unknown"));
+        let r = classify_refusal("main_abilities.clothes: 55 is not a value of the game's ability enum (0); the save is left as it is");
+        assert_eq!((r.field.as_str(), r.code.as_str()), ("main_abilities.clothes", "main_unknown"));
+        let r = classify_refusal("main_abilities.head: a main slot is never empty (null leaves the piece's own) (0); the save is left as it is");
+        assert_eq!((r.field.as_str(), r.code.as_str()), ("main_abilities.head", "main_empty"));
+        for m in [
+            "main_abilities.head must be an ability name or an enum value (0); the save is left as it is",
+            "main_abilities has an unknown part \"hat\" (head, clothes, shoes) (0); the save is left as it is",
+            "main_abilities must be an object {\"head\": a, \"clothes\": b, \"shoes\": c} (0); the save is left as it is",
+        ] {
+            assert_eq!(classify_refusal(m).code, "main_invalid", "{m}");
+        }
+        assert_eq!(classify_refusal("main_abilities has an unknown part \"hat\" (head, clothes, shoes) (0); the save is left as it is").field, "main_abilities");
+        let r = classify_refusal("main_abilities: the save does not own the equipped gear (give it in \"gear\" too) (1018); the save is left as it is");
+        assert_eq!((r.field.as_str(), r.code.as_str(), r.id), ("main_abilities", "main_not_owned", Some(1018)));
+        let f = parse_log("[x] save profile: main_abilities.head: ability 105 is not the main ability of any head piece of the game (0); the save is left as it is");
+        assert_eq!((f.state.as_str(), f.refusal.unwrap().code.as_str()), ("failed", "main_part"));
     }
 }

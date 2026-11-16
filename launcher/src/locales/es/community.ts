@@ -274,6 +274,9 @@ export const community: CommunityDict = {
   "f.presence.offline": "sin conexión",
   "f.block": "Bloquear",
   "f.block.confirm": "¿Bloquear a {name}? Dejarán de ser amigos y esa persona ya no podrá invitarle.",
+  "f.blocked": "Jugadores bloqueados",
+  "f.blocked.lead": "No pueden invitarle ni enviarle solicitudes de amistad. Desbloquear no los vuelve a hacer amigos.",
+  "f.unblock": "Desbloquear",
 
   "r.ladders": "Clasificaciones",
   "r.none": "No hay ninguna clasificación en este servidor.",

@@ -86,9 +86,9 @@ static const char *const known[] = {
     "FLIGHT_SPIKE_MS", "FLIGHT_THUMBS", "FLUSH_SPAN", "FN_TRACE", "FN_TRACE_DEPTH", "FOV", "FOV_PATCH", "FPS60", "FPS_LIMIT", "FRAME_QUEUE",
     "FREEZE_IDLE", "FREE_CORES",
     "FULLSCREEN", "FXAA", "GPL", "GPL_DRAW_BUILD", "GPU", "GPU_INDEX", "GPU_NAME", "HDR", "HDR_GAME_NITS", "HDR_HUE",
-    "HDR_PEAK_NITS", "HDR_UI_NITS", "HEAP_COMMIT", "HIGHFPS_FIX", "INPUT", "INPUT_LIVE", "INPUT_RECORD", "INPUT_SCRIPT", "KSPIN_US", "LANG", "LIB_PREBUILD", "LOW_LATENCY", "LOW_MEMORY",
+    "HDR_PEAK_NITS", "HDR_UI_NITS", "HEAP_COMMIT", "HIGHFPS_FIX", "INPUT", "INPUT_FIRST", "INPUT_FIRST_PATCH", "INPUT_LIVE", "INPUT_RECORD", "INPUT_SCRIPT", "KSPIN_US", "LANG", "LATE_INPUT", "LIB_PREBUILD", "LOW_LATENCY", "LOW_MEMORY",
     "LIB_PREBUILD_KEEP", "LIB_PREBUILD_THREADS", "LOCALE", "LOD_GUARD", "LSTICK_DEADZONE", "MEMORY", "MENU_LANG", "MENU_TEST",
-    "MEM_RESERVE_MIB", "MENU_ANIM", "MENU_CURSOR", "MENU_CURSOR_LOG", "MENU_TEST_DIR", "MENU_TEST_SET", "MGYRO_BENCH", "MGYRO_BENCH_DELAY", "MGYRO_BENCH_EXIT", "MGYRO_BENCH_OUT", "MINIMAL_LAYOUT", "MIRROR_GAP", "MODS_DIR", "MODS_DISABLED", "MODS_ORDER", "MODS_REBUILD", "MOTION", "MOUSE_AIM_SCALE", "MOUSE_GYRO", "MOUSE_GYRO_ATTITUDE", "MOUSE_GYRO_CM360", "MOUSE_GYRO_DPI", "MOUSE_GYRO_INVERT_Y", "MOUSE_GYRO_PITCH", "MOUSE_GYRO_RECENTER_KEY", "MOUSE_GYRO_SENS", "MOUSE_GYRO_X", "MOUSE_GYRO_Y", "MOUSE_MODE", "MOUSE_DIRECT_PATCH", "MOUSE_SENS", "MOVIE_ASPECT", "MOVIE_HOST", "MOVIE_PACE",
+    "MEM_RESERVE_MIB", "MENU_ANIM", "MENU_CURSOR", "MENU_CURSOR_LOG", "MENU_TEST_DIR", "MENU_TEST_SET", "MGYRO_BENCH", "MGYRO_BENCH_DELAY", "MGYRO_BENCH_DETAIL", "MGYRO_BENCH_EXIT", "MGYRO_BENCH_FIELDS", "MGYRO_BENCH_OBJ", "MGYRO_BENCH_OUT", "MGYRO_BENCH_POKE", "MINIMAL_LAYOUT", "MIRROR_GAP", "MODS_DIR", "MODS_DISABLED", "MODS_ORDER", "MODS_REBUILD", "MOTION", "MOUSE_AIM_SCALE", "MOUSE_GYRO", "MOUSE_GYRO_ATTITUDE", "MOUSE_GYRO_CM360", "MOUSE_GYRO_DPI", "MOUSE_GYRO_INVERT_Y", "MOUSE_GYRO_PITCH", "MOUSE_GYRO_RECENTER_KEY", "MOUSE_GYRO_SENS", "MOUSE_GYRO_X", "MOUSE_GYRO_Y", "MOUSE_MODE", "MOUSE_DIRECT_PATCH", "MOUSE_NATIVE", "MOUSE_NATIVE_PATCH", "MOUSE_SENS", "MOVIE_ASPECT", "MOVIE_HOST", "MOVIE_PACE",
     "MVOBJ_ALL", "MVOBJ_BANKS", "MVOBJ_EQUAL", "MVOBJ_EXACT", "MVOBJ_EXEC", "MVOBJ_NOC4", "MVOBJ_ONLY", "MVOBJ_TIMES", "MVPREV_CHECK", "MVPREV_GROW", "MVPREV_SKIP", "MVPREV_TRUST", "MV_CHECK",
     "MV_SURVEY",
     "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PASS_CRUMBS", "PATCH_OUTPUT", "PATCH_SCENE", "PCORE", "PCSS", "PCSS_K", "PERF_OVERLAY", "PERF_SLOW_MS", "PIPELINE_CACHE", "PIPE_KEEP_LAUNCHES", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT",
@@ -108,7 +108,7 @@ static const char *const known[] = {
 
 // The totk.ini section a key cfg_set may write goes to when the file lacks it (totk.ini.example's sections).
 static const struct { const char *key, *section; } sections[] = {
-    {"FPS_LIMIT", "frame rate"}, {"FPS60", "frame rate"}, {"FRAME_QUEUE", "frame rate"}, {"LOW_LATENCY", "frame rate"},
+    {"FPS_LIMIT", "frame rate"}, {"FPS60", "frame rate"}, {"FRAME_QUEUE", "frame rate"}, {"LOW_LATENCY", "frame rate"}, {"LATE_INPUT", "frame rate"}, {"INPUT_FIRST", "frame rate"},
     {"REALTIME", "frame rate"}, {"CLOTH_REALTIME", "frame rate"}, {"HIGHFPS_FIX", "frame rate"},
     {"CLIMB_FIX", "frame rate"},
     {"FULLSCREEN", "display"}, {"WINDOW_SIZE", "display"}, {"PERF_OVERLAY", "display"}, {"VK_PRESENT", "display"},
@@ -130,7 +130,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"MOTION", "input"}, {"RUMBLE_STRENGTH", "input"}, {"RUMBLE_CURVE", "input"}, {"RUMBLE_TRIGGERS", "input"},
     {"PAD_LAYOUT", "input"}, {"PROMPTS", "input"}, {"STICK_DEADZONE", "input"}, {"LSTICK_DEADZONE", "input"}, {"RSTICK_DEADZONE", "input"},
     {"STICK_SENS", "input"},
-    {"MENU_CURSOR", "input"}, {"MOUSE_MODE", "input"}, {"MOUSE_SENS", "input"}, {"MOUSE_AIM_SCALE", "input"}, {"MOUSE_GYRO", "input"}, {"MOUSE_GYRO_SENS", "input"}, {"MOUSE_GYRO_CM360", "input"}, {"MOUSE_GYRO_DPI", "input"}, {"MOUSE_GYRO_X", "input"}, {"MOUSE_GYRO_Y", "input"}, {"MOUSE_GYRO_INVERT_Y", "input"}, {"MOUSE_GYRO_PITCH", "input"}, {"MOUSE_GYRO_RECENTER_KEY", "input"}, {"MOUSE_GYRO_ATTITUDE", "input"}, {"WALK_KEY", "input"}, {"WALK_SCALE", "input"}, {"INPUT_RECORD", "input"},
+    {"MENU_CURSOR", "input"}, {"MOUSE_MODE", "input"}, {"MOUSE_SENS", "input"}, {"MOUSE_AIM_SCALE", "input"}, {"MOUSE_GYRO", "input"}, {"MOUSE_GYRO_SENS", "input"}, {"MOUSE_GYRO_CM360", "input"}, {"MOUSE_GYRO_DPI", "input"}, {"MOUSE_GYRO_X", "input"}, {"MOUSE_GYRO_Y", "input"}, {"MOUSE_GYRO_INVERT_Y", "input"}, {"MOUSE_GYRO_PITCH", "input"}, {"MOUSE_GYRO_RECENTER_KEY", "input"}, {"MOUSE_GYRO_ATTITUDE", "input"}, {"MOUSE_NATIVE", "input"}, {"WALK_KEY", "input"}, {"WALK_SCALE", "input"}, {"INPUT_RECORD", "input"},
     {"BIND_A", "input"}, {"BIND_B", "input"}, {"BIND_X", "input"}, {"BIND_Y", "input"}, {"BIND_LCLICK", "input"},
     {"BIND_RCLICK", "input"}, {"BIND_L", "input"}, {"BIND_R", "input"}, {"BIND_ZL", "input"}, {"BIND_ZR", "input"},
     {"BIND_PLUS", "input"}, {"BIND_MINUS", "input"}, {"BIND_LEFT", "input"}, {"BIND_UP", "input"},
@@ -162,7 +162,7 @@ static const CfgMeta metas[] = {
     {"PERF_OVERLAY", "off", "off|fps|full", LIVE},
     {"OUTPUT_RES", "1920x1080", NULL, RESTART}, {"RENDER_SCALE", "game", "game|50|67|75|100|125|150|200", RESTART},
     {"DYNAMIC_RES", "1", "0|1", LIVE},   // resolution.c res_dynres_live
-    {"UPSCALER", "fsr", "fsr4|fsr3|fsr|dlss|dlaa|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
+    {"UPSCALER", "fsr", "fsr4|fsr3|fsr|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
     {"DLAA", "0", "0|1", RESTART}, {"DLSS", "dlaa", "dlaa|quality|balanced|performance|ultra_performance", LIVE},
     {"DLSS_PRESET", "default", "default|k|j", LIVE},
     {"DLSS_CHAR_MASK", "65", "0|35|65|100", LIVE}, {"FXAA", "1", "0|1", LIVE},
@@ -181,7 +181,8 @@ static const CfgMeta metas[] = {
     {"SHADOW_RANGE", "100", "50..400", RESTART}, {"CONTACT_SHADOWS", "0", "0..100", RESTART},
     {"PCSS", "0", "0..200", RESTART},
     // Game
-    {"FPS_LIMIT", "60", "30|40|45|60|90|120|144|display", LIVE}, {"FPS60", "1", "0|1", LIVE}, {"FRAME_QUEUE", "0", "0|1", LIVE}, {"LOW_LATENCY", "1", "0|1", LIVE},
+    {"FPS_LIMIT", "60", "30|40|45|60|90|120|144|display", LIVE}, {"FPS60", "1", "0|1", LIVE}, {"FRAME_QUEUE", "0", "0|1", LIVE}, {"LOW_LATENCY", "1", "0|1", LIVE}, {"LATE_INPUT", "1", "0|1", LIVE},
+    {"INPUT_FIRST", "1", "0|1", LIVE},
     {"REALTIME", "1", "0|1", RESTART}, {"CLOTH_REALTIME", "1", "0|1", RESTART},
     {"MODS_REBUILD", "auto", "auto|off", RESTART},
     {"HIGHFPS_FIX", "1", "0|1", RESTART}, {"CLIMB_FIX", "1", "0|1", RESTART},
@@ -200,7 +201,7 @@ static const CfgMeta metas[] = {
     {"MOUSE_GYRO_CM360", "0", "0..200", LIVE}, {"MOUSE_GYRO_DPI", "800", "100..32000", LIVE},
     {"MOUSE_GYRO_X", "1", "0.1..4", LIVE}, {"MOUSE_GYRO_Y", "1", "0.1..4", LIVE}, {"MOUSE_GYRO_INVERT_Y", "0", "0|1", LIVE},
     {"MOUSE_GYRO_PITCH", "60", "10..89", LIVE}, {"MOUSE_GYRO_RECENTER_KEY", "none", NULL, LIVE},
-    {"MOUSE_GYRO_ATTITUDE", "flat", "flat|upright", LIVE},
+    {"MOUSE_GYRO_ATTITUDE", "flat", "flat|upright", LIVE}, {"MOUSE_NATIVE", "1", "0|1", LIVE},
     {"MOUSE_SENS", "1", "0..10", LIVE}, {"MOUSE_AIM_SCALE", "1", "0.1..3", LIVE}, {"MENU_CURSOR", "1", "0|1", LIVE},
     {"WALK_KEY", "none", NULL, LIVE}, {"WALK_SCALE", "0.51", "0.2..0.9", LIVE},
     {"MENU_LANG", "", "en|fr|ru|pt-BR|zh-Hans|es|ja", LIVE}, {"MENU_ANIM", "1", "0|1", LIVE},

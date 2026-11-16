@@ -111,6 +111,12 @@ struct MotionFusion *input_motion_source(void);
 int input_motion_is_mouse(const struct MotionFusion *m);
 // Degrees of controller turn per count in effect: mouse_gyro_sens, or what mouse_gyro_cm360 and mouse_gyro_dpi make.
 double input_mouse_gyro_deg_per_count(void);
+// mouse_native.c, while it makes the pitch linear: a turn of the virtual controller's pitch in degrees (up positive) at
+// the next read, besides the mouse's counts, at most MG_FOLLOW_DEG a read and toward a pitch at least 10 degrees inside
+// mouse_gyro_pitch (mouse_gyro.h, MouseGyroFollow); a request holds for one read. input_mouse_gyro_followed: the
+// degrees it has turned by that way in all, and in *pitch_deg the controller's pitch, both as of the last read.
+void input_mouse_gyro_follow(double delta_deg);
+double input_mouse_gyro_followed(double *pitch_deg);
 void input_motion_restart(void);   // StartSixAxisSensor: both sensors start over
 // SDL sensor values (accelerometer m/s^2, gyro rad/s, SDL gamepad axes) to the Switch controller frame motion_feed
 // takes (acceleration in G as gravity reads, rotation rad/s). The mapping is documented in input_win.c.

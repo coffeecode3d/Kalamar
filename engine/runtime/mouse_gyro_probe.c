@@ -117,7 +117,7 @@ int probe_mgyro(void) {
         double worst = 0, turned = 0, sum = 0;
         static const double n[] = {1, -1, 7, 120, -300, 2000, 9000, -9000};
         for (size_t i = 0; i < sizeof n / sizeof *n; i++) {
-            mgyro_frame(&g, &c, n[i], 0, FRAME, 0.005, &s);
+            mgyro_frame(&g, &c, n[i], 0, NULL, FRAME, 0.005, &s);
             double y = game_yaw_deg(&s);
             worst = fmax(worst, fabs(y - (-n[i] * 0.04)) / fmax(1, fabs(n[i] * 0.04)));
             turned += y, sum += -n[i] * 0.04;
@@ -137,7 +137,7 @@ int probe_mgyro(void) {
         dir_to_B(&s, B);
         double worst = 0;
         for (int i = 0; i < 200; i++) {
-            mgyro_frame(&g, &c, floor(rnd() * 61) - 30, 0, FRAME, 0.005, &s);
+            mgyro_frame(&g, &c, floor(rnd() * 61) - 30, 0, NULL, FRAME, 0.005, &s);
             double w[3] = {s.gyro[0] * TWO_PI, s.gyro[1] * TWO_PI, s.gyro[2] * TWO_PI};
             turn(B, w, FRAME);
             dir_to_B(&s, want);
@@ -155,8 +155,8 @@ int probe_mgyro(void) {
             MouseGyroCfg c = cfg(0, mode);
             MouseGyro g;
             mgyro_reset(&g, 0);
-            mgyro_frame(&g, &c, 0, -500, FRAME, 0.005, &s);   // 20 degrees up
-            mgyro_frame(&g, &c, 250, 0, FRAME, 0.005, &s);    // 10 degrees right
+            mgyro_frame(&g, &c, 0, -500, NULL, FRAME, 0.005, &s);   // 20 degrees up
+            mgyro_frame(&g, &c, 250, 0, NULL, FRAME, 0.005, &s);    // 10 degrees right
             got[mode] = game_yaw_deg(&s), roll[mode] = s.gyro[1];
         }
         CHECK(fabs(got[2] + 10) < 1e-4 && fabs(roll[2]) < 1e-9, "pitched: mode 2 turns 10 degrees about gravity, no rate about y");
@@ -169,24 +169,47 @@ int probe_mgyro(void) {
         MouseGyroCfg c = cfg(0, 2);
         MouseGyro g;
         mgyro_reset(&g, 0);
-        mgyro_frame(&g, &c, 0, -250, FRAME, 0.005, &s);   // 10 degrees up
+        mgyro_frame(&g, &c, 0, -250, NULL, FRAME, 0.005, &s);   // 10 degrees up
         CHECK(fabs(asin(s.dir[5]) * 180 / M_PI - 10) < 1e-4, "pitch: 250 counts up tilt the controller's y axis 10 degrees up");
         CHECK(s.gyro[0] > 0 && fabs(s.gyro[0] * TWO_PI * FRAME * 180 / M_PI - 10) < 1e-4, "pitch: the rate about x is the tilt over the frame");
         CHECK(fabs(s.acc[1] + sin(10 * M_PI / 180)) < 1e-5 && fabs(s.acc[2] + cos(10 * M_PI / 180)) < 1e-5,
               "pitch: gravity tilts with it");
-        for (int i = 0; i < 10; i++) mgyro_frame(&g, &c, 0, -1000, FRAME, 0.005, &s);
+        for (int i = 0; i < 10; i++) mgyro_frame(&g, &c, 0, -1000, NULL, FRAME, 0.005, &s);
         CHECK(fabs(g.pitch * 180 / M_PI - 80) < 1e-9, "pitch: clamped at the limit");
-        mgyro_frame(&g, &c, 0, -100, FRAME, 0.005, &s);
+        mgyro_frame(&g, &c, 0, -100, NULL, FRAME, 0.005, &s);
         CHECK(fabs(s.gyro[0]) < 1e-9, "pitch: no rate while pushing into the limit");
         MouseGyroCfg inv = c;
         inv.invert_y = 1, inv.scale_x = 2, inv.scale_y = 0.5;
         mgyro_reset(&g, 0);
-        mgyro_frame(&g, &inv, 10, -10, FRAME, 0.005, &s);
+        mgyro_frame(&g, &inv, 10, -10, NULL, FRAME, 0.005, &s);
         double k = 0.04 * M_PI / 180;
         CHECK(fabs(g.pitch - (-10 * k * 0.5)) < 1e-12 && fabs(g.yaw - (-10 * k * 2)) < 1e-12,
               "scale: invert_y flips pitch, x and y scale each axis");
         mgyro_recenter(&g);
         CHECK(g.pitch == 0 && g.yaw == 0, "recenter: level and yaw 0");
+        // a turn to follow (mouse_native.c): at most rate_deg of it a frame after the counts, in the rate and the matrix,
+        // counted in g.followed, and toward a pitch within span_deg of level
+        MouseGyroFollow f = {.delta_deg = -11, .rate_deg = 2, .span_deg = 50};
+        mgyro_reset(&g, 0);
+        mgyro_frame(&g, &c, 0, -250, NULL, FRAME, 0.005, &s);   // 10 degrees up
+        mgyro_frame(&g, &c, 0, -25, &f, FRAME, 0.005, &s);      // 1 up by the mouse, 2 down by the follow
+        CHECK(fabs(g.pitch * 180 / M_PI - 9) < 1e-9 && fabs(g.followed + 2) < 1e-9, "follow: 2 degrees of the turn after the counts");
+        CHECK(fabs(s.gyro[0] * TWO_PI * FRAME * 180 / M_PI + 1) < 1e-4 && fabs(asin(s.dir[5]) * 180 / M_PI - 9) < 1e-4,
+              "follow: the rate and the matrix carry the frame's whole turn");
+        for (int i = 0; i < 10; i++) {
+            f.delta_deg = -g.pitch * 180 / M_PI;   // back to level, asked again each frame
+            mgyro_frame(&g, &c, 0, 0, &f, FRAME, 0.005, &s);
+        }
+        CHECK(fabs(g.pitch) < 1e-12 && fabs(g.followed + 11) < 1e-9, "follow: stops where it was asked to");
+        f.delta_deg = 20, f.span_deg = 5;
+        mgyro_frame(&g, &c, 0, 0, &f, FRAME, 0.005, &s);
+        mgyro_frame(&g, &c, 0, 0, &f, FRAME, 0.005, &s);
+        mgyro_frame(&g, &c, 0, 0, &f, FRAME, 0.005, &s);
+        CHECK(fabs(g.pitch * 180 / M_PI - 5) < 1e-9, "follow: not past span_deg from level");
+        mgyro_frame(&g, &c, 0, -250, NULL, FRAME, 0.005, &s);   // 10 degrees further up by the mouse: 15
+        f.delta_deg = 3;
+        mgyro_frame(&g, &c, 0, 0, &f, FRAME, 0.005, &s);
+        CHECK(fabs(g.pitch * 180 / M_PI - 13) < 1e-9, "follow: a controller past span_deg is brought back toward it");
     }
 
     // 5. A state between reads: the attitude as it was, no rate, gravity 1 G.
@@ -194,7 +217,7 @@ int probe_mgyro(void) {
         MouseGyroCfg c = cfg(0, 2);
         MouseGyro g;
         mgyro_reset(&g, 0);
-        mgyro_frame(&g, &c, 100, -100, FRAME, 0.005, &s);
+        mgyro_frame(&g, &c, 100, -100, NULL, FRAME, 0.005, &s);
         MotionState r;
         mgyro_rest(&g, 0.003, &r);
         CHECK(!memcmp(r.dir, s.dir, sizeof r.dir) && !memcmp(r.acc, s.acc, sizeof r.acc) && r.gyro[0] == 0 &&
@@ -251,7 +274,7 @@ int probe_mgyro(void) {
         uint64_t now = 1000000000ull;
         motion_restart(m);
         for (int i = 0; i < 40; i++) {
-            if (i % 4 == 3) mgyro_frame(&g, &c, 5, 0, FRAME, 0.005, &s);
+            if (i % 4 == 3) mgyro_frame(&g, &c, 5, 0, NULL, FRAME, 0.005, &s);
             else mgyro_rest(&g, 0.005, &s);
             motion_push(m, &s, now);
             now += 5000000;

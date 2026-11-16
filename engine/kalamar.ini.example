@@ -26,6 +26,15 @@
 # screen shows follows the mouse, the keys and the controller by about one frame instead of three. 0 goes back to the
 # older pacing, which holds every finished frame two more frames. Takes effect at once.
 # low_latency = 1
+# Late input (Splatoon 3, with low_latency): the game reads the mouse, the keys and the controller just before it
+# draws the frame instead of a whole frame earlier (12 ms less at 60 fps). 0 reads them early again. Takes effect at
+# once; has no effect with frame_queue = 1.
+# late_input = 1
+# Input first (Splatoon 3 11.3.0): the game reads the mouse, the keys and the controller before it runs the frame's
+# logic instead of after it, so the next picture on screen shows them: one frame (16.7 ms at 60 fps) less between the
+# input and the screen. Each frame still reads the input once and runs its logic once; only their order changes. 0
+# keeps the game's order. Takes effect at once.
+# input_first = 1
 # Real-time frame step: game speed follows the clock instead of the frame count.
 # realtime = 1
 # Cloth simulation on the real-time clock. Needs realtime = 1.
@@ -175,9 +184,8 @@
 # render_scale = game
 # Scaling to the window when it is larger than the game resolution: fsr4 (AMD FSR 4.1, temporal: the sharpest, needs
 # AMD's FidelityFX upscaler runtime next to the executable, see LINUX.md), fsr3 (FSR 3.1, the same runtime picks the
-# version it can run), fsr (AMD FSR 1, spatial), dlss or dlaa (NVIDIA RTX cards; DLSS uses nvngx_dlss.dll on Windows,
-# libnvidia-ngx-dlss.so.<version> on Linux) or bilinear, and the sharpening from 0 (off) to 100. Changes while the game
-# runs take effect at once.
+# version it can run), fsr (AMD FSR 1, spatial) or bilinear, and the sharpening from 0 (off) to 100. Choosing 4.1 or 3.1
+# without that file runs FSR 1. Changes while the game runs take effect at once.
 # upscaler = fsr
 # sharpness = 80
 # Picture shape when the window's shape differs from the game resolution's (a 16:9 picture in a 21:9 fullscreen
@@ -361,12 +369,21 @@
 # mouse_gyro_invert_y = 0
 # How far the virtual controller tilts up or down, in degrees (10 to 89). The game's camera reaches its own limits
 # (60 degrees up, 75 down) with the controller about 25 degrees up or 31 down at its default motion sensitivity; past
-# 65 degrees down the game stops following the controller for a while.
+# 65 degrees down the game stops following the controller for a while. With native mouse aiming (mouse_native) the
+# controller's tilt follows the view, 10 degrees inside this limit at most, so the limit no longer bounds the aim.
 # mouse_gyro_pitch = 60
 # A key that levels the virtual controller (none: no key; the Y button recenters the game's camera and leaves the
 # controller as it is). Levelling turns the camera's pitch by as much at the next vertical move. Key names as in the bind_
 # lines below.
 # mouse_gyro_recenter_key = none
+# Native mouse aiming (Splatoon 3 11.3.0): while the mouse is the gyro, the game's own smoothing of a controller's motion
+# is off, so each frame's mouse movement reaches the aim whole in that frame, up and down as well as sideways, and a turn
+# back the other way is not eased in (measured: without it the pitch reached 90% of a step about ten frames late). The
+# pitch also turns by the yaw's own degrees per count over its whole range, where the game's tilt curve made it slower
+# near the top and faster below level. The game's sensitivity, pitch limits and Y recentre stay. A real gamepad's gyro
+# keeps the game's smoothing and curve. 1 (default) on, 0 the game's smoothing and curve for the mouse too. Changes while
+# the game runs.
+# mouse_native = 1
 # The keyboard's sticks are all or nothing, so the game only sees a full tilt from them; while this key is held the
 # keyboard-driven stick values shrink and the keyboard can walk instead of run. Key names as in the bind_ lines below,
 # none turns it off. 0.2 to 0.9, the default holds for anything else. Only the keyboard is scaled: the mouse camera and

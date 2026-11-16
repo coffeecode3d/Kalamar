@@ -104,8 +104,6 @@ static int p_getp(const NgxParam *p, const char *n, void **v) { return NGX_OK(((
 // loading the driver's NGX core on every NVIDIA machine would cost start time and change the device with DLAA off. So
 // dlaa applies after a restart; switched off, nothing else of DLAA runs.
 int vk_dlaa_wanted(void) {
-    const char *u = cfg_get("TOTK_UPSCALER");
-    if (u && (!strcmp(u, "dlss") || !strcmp(u, "dlaa"))) return 1;
     static int wanted = -1;
     if (wanted < 0) wanted = cfg_bool("TOTK_DLAA");
     return wanted;

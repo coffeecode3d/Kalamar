@@ -512,8 +512,16 @@
 .sub-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subs-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); gap: var(--sp-2); }
 .subs-fill { margin: 0 0 var(--sp-3); }
+/* The main slot beside the three sub slots: one slot of the same look, its own caption */
+.abil-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-2) var(--sp-3); }
+.abil-group { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.abil-main { width: min(100%, 14rem); }
+.abil-subs { flex: 1 1 18rem; }
+.abil-label { color: var(--text-2); font-size: var(--fs-sm); font-weight: 650; }
+.main-own { margin-left: auto; flex: none; font-weight: 400; }
+.subs-off-line { display: flex; }
 .opt-hint { margin: 0 0 0 1.7rem; font-weight: 400; }
-@media (max-width: 760px) { .subs-slots { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .subs-slots { grid-template-columns: 1fr; } .abil-main { width: 100%; } }
 
 .vg { position: relative; overflow-y: auto; overflow-x: hidden; background: rgba(6, 4, 26, 0.5); border: 1px solid var(--line); border-radius: var(--r-lg); }
 .vg-fill { height: calc(100vh - 21rem); min-height: 20rem; }
@@ -792,3 +800,17 @@ strong.t-alpha, strong.t-bravo, strong.t-charlie, strong.t-delta { color: var(--
 /* First run: the wizard takes the whole window (no rail). */
 .shell-setup { display: block; }
 .shell-setup .main { padding-left: max(var(--sp-6), 6vw); padding-right: max(var(--sp-6), 6vw); }
+
+/* ---- Loadout presets (Locker, gear and weapon tabs) ------------------------------------------------------- */
+.presets { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.presets-title { font-size: var(--fs-md); font-weight: 750; }
+.presets-save input { flex: 1 1 12rem; min-width: 0; max-width: 20rem; }
+.preset-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: var(--sp-2); max-height: 15rem; overflow-y: auto; }
+.preset { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-1) var(--sp-3); align-items: center; padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-md); }
+.preset-on { border-color: var(--line-strong); }
+.preset-icons { display: flex; gap: 2px; }
+.preset-icon { width: 34px; height: 34px; }
+.preset-name { min-width: 0; display: flex; flex-direction: column; }
+.preset-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-current { font-size: var(--fs-xs); color: var(--text-2); }
+.preset-actions { grid-column: 1 / -1; gap: var(--sp-2); }

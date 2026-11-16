@@ -1169,12 +1169,17 @@ static double mouse_gyro_prepare(MouseGyroCfg *cfg, uint64_t now) {
     int key = mg_key != KEY_NONE && ikb_foreground() && ikb_down(mg_key);
     int recenter = (key && !mg_key_prev) | (int)__atomic_exchange_n(&mg_recenter_req, 0, __ATOMIC_RELAXED);
     mg_key_prev = key;
+    // mg.followed: a running total mouse_native.c reads, of the controller's pitch turns that are no mouse motion. It
+    // goes on across a restart, and the restart's and the recentre's levelling count in it, so the linear pitch takes
+    // neither for a turn of the mouse.
     if (__atomic_exchange_n(&mg_restart_req, 0, __ATOMIC_RELAXED)) {
+        double followed = mg.followed - mg.pitch * 180.0 / M_PI;
         mgyro_reset(&mg, cfg->upright);
+        mg.followed = followed;
         motion_restart(mg_fusion);
         mg_last_push = 0;
     }
-    if (recenter) mgyro_recenter(&mg);
+    if (recenter) mg.followed -= mg.pitch * 180.0 / M_PI, mgyro_recenter(&mg);
     double dt = mg_last_push && now > mg_last_push ? (double)(now - mg_last_push) / 1e9 : MG_REST_NS / 1e9;
     return dt > 0.1 ? 0.1 : dt;
 }
@@ -1216,6 +1221,26 @@ static void mouse_gyro_tick(uint64_t now) {
     plat_mutex_unlock(&mg_lock);
 }
 
+// The turn mouse_native.c asked the controller's pitch to make at the next read (mg_lock), and whether it was asked
+// since the last read.
+#define MG_FOLLOW_DEG 1.0
+static double mg_follow_delta;
+static int mg_follow_asked;
+
+void input_mouse_gyro_follow(double delta_deg) {
+    plat_mutex_lock(&mg_lock);
+    mg_follow_delta = delta_deg, mg_follow_asked = 1;
+    plat_mutex_unlock(&mg_lock);
+}
+
+double input_mouse_gyro_followed(double *pitch_deg) {
+    plat_mutex_lock(&mg_lock);
+    double v = mg.followed;
+    *pitch_deg = mg.pitch * 180.0 / M_PI;
+    plat_mutex_unlock(&mg_lock);
+    return v;
+}
+
 int input_mouse_gyro_read(MotionState *out, int max, uint64_t now) {
     plat_mutex_lock(&mg_lock);
     if (mg_inited && input_mouse_gyro_on()) {
@@ -1225,8 +1250,13 @@ int input_mouse_gyro_read(MotionState *out, int max, uint64_t now) {
         // a frame's turn modulo a whole turn (measured: 2400 counts in one frame turned it 130 degrees the other way):
         // more than MG_FRAME_MAX_DEG of controller yaw waits for the next read; a reversal waits MG_REVERSE_HOLD reads
         dx = mgyro_frame_yaw(&mg, dx, MG_FRAME_MAX_DEG / (cfg.deg_per_count * cfg.scale_x), mgb_reverse_hold(MG_REVERSE_HOLD));
+        // the turn mouse_native.c asked for since the last read, toward a pitch at least 10 degrees inside the limit,
+        // so the mouse always has room to tilt the controller further
+        MouseGyroFollow follow = {.delta_deg = mg_follow_delta, .rate_deg = mg_follow_asked ? MG_FOLLOW_DEG : 0,
+                                  .span_deg = cfg.pitch_limit_deg - 10 > 0 ? cfg.pitch_limit_deg - 10 : 0};
+        mg_follow_asked = 0;
         MotionState s;
-        mgyro_frame(&mg, &cfg, dx, dy, 1.0 / MOUSE_GYRO_GAME_HZ, dt, &s);
+        mgyro_frame(&mg, &cfg, dx, dy, &follow, 1.0 / MOUSE_GYRO_GAME_HZ, dt, &s);
         mouse_gyro_push(&s, now);
         mg_last_read = now;
     }

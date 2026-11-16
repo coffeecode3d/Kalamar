@@ -83,6 +83,11 @@ pub trait GameHost: Send + Sync {
     fn current_sub_abilities(&self) -> HashMap<String, Vec<Option<String>>> {
         HashMap::new()
     }
+    /// The main ability the player chose in the Locker, by gear part, when the launcher applies its profile: a match
+    /// loadout that names gear for a part carries it (`contract::loadout_profile`).
+    fn current_main_abilities(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
     /// Developer tools only (`proto_peer --loadout-rules`): loadout constraints handled as if the match carried them
     /// (`rules.loadout`), to try the launcher's loadout path with a server that imposes none. The launcher never sets it.
     fn local_loadout_rules(&self) -> Option<Value> {
@@ -585,6 +590,7 @@ impl Runner {
             if !plan.loadout.is_empty() {
                 let current = self.host.current_loadout();
                 let subs = self.host.current_sub_abilities();
+                let mains = self.host.current_main_abilities();
                 let mine = |me: &Self| lock(&me.picks).get(&id).cloned().unwrap_or_default();
                 let (_, open) = contract::resolve_loadout(&plan.loadout, &mine(&self), &current, false);
                 if !open.is_empty() {
@@ -601,7 +607,7 @@ impl Runner {
                 let (chosen, _) = contract::resolve_loadout(&plan.loadout, &mine(&self), &current, true);
                 let file = paths.dir.join(format!("loadout-{}.json", plan.match_id));
                 if !chosen.is_empty() {
-                    if let Err(e) = crate::util::atomic_write(&file, contract::loadout_profile(&chosen, &subs).to_string().as_bytes()) {
+                    if let Err(e) = crate::util::atomic_write(&file, contract::loadout_profile(&chosen, &subs, &mains).to_string().as_bytes()) {
                         st.phase = "failed".into();
                         st.code = Some(contract::ERR_FAILED.into());
                         st.reason = Some(format!("the match loadout could not be written: {e}"));
@@ -665,7 +671,7 @@ impl Runner {
             let body = match &st.loadout {
                 Some(Value::Object(l)) if !l.is_empty() => {
                     let chosen: Vec<(String, String)> = l.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect();
-                    let mut p = contract::loadout_profile(&chosen, &HashMap::new()); // what the server is told: ids only
+                    let mut p = contract::loadout_profile(&chosen, &HashMap::new(), &HashMap::new()); // what the server is told: ids only
                     if let Some(o) = p.as_object_mut() {
                         o.remove("version");
                     }

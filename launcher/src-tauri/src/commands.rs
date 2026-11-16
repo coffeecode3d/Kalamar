@@ -7,6 +7,7 @@ use crate::lan::{self, LanRequest};
 use crate::launch::{self, GameManager, GameStatus, Notifier, RunState};
 use crate::game::catalogue::{self, Catalogue};
 use crate::game::service::{GameService, IconProgress};
+use crate::loadouts::{self, Loadout, Preset};
 use crate::profile::{self, Profile};
 use crate::{automatch, gamelang, matchcode, migrate, online, relay, servercard, startmode};
 use crate::settings::{self, Change, Schema, SettingsState};
@@ -75,9 +76,19 @@ impl AppState {
     /// The abilities a sub slot can hold, read from the install's keys file (`game::subs`). The install folder is the
     /// wizard's choice, else two levels above the game folder (`<install>\work\<game>`), as `proto::glue` finds it.
     pub(crate) fn sub_capable(&self) -> Option<Vec<String>> {
+        self.keys_files().into_iter().find_map(|k| crate::game::subs::read_sub_capable(&k))
+    }
+
+    /// The abilities a main slot can hold (every ability of the game's enum but the empty one), from the same keys file.
+    pub(crate) fn main_capable(&self) -> Option<Vec<String>> {
+        self.keys_files().into_iter().find_map(|k| crate::game::subs::read_main_capable(&k))
+    }
+
+    /// Where the install's keys file can be: in the wizard's install folder, else two levels above the game folder.
+    fn keys_files(&self) -> Vec<PathBuf> {
         let configured = self.cfg().install.dir.map(PathBuf::from);
         let from_root = self.root().ok().and_then(|r| r.parent().and_then(Path::parent).map(Path::to_path_buf));
-        configured.into_iter().chain(from_root).find_map(|d| crate::game::subs::read_sub_capable(&installer::Layout::new(d).keys_json()))
+        configured.into_iter().chain(from_root).map(|d| installer::Layout::new(d).keys_json()).collect()
     }
 
     fn translator(&self) -> Option<PathBuf> {
@@ -1177,45 +1188,62 @@ pub fn profile_load(state: St) -> Profile {
 
 fn validated(state: &AppState, p: &Profile) -> AppResult<Profile> {
     let view = catalogue_view(state, false);
-    let subs = state.sub_capable();
-    profile::validate_profile(p, &view.catalogue, subs.as_deref())
+    let (subs, mains) = (state.sub_capable(), state.main_capable());
+    profile::validate_profile(p, &view.catalogue, subs.as_deref(), mains.as_deref())
 }
 
-/// What the Locker's sub-ability editor needs to know (`gear_abilities_info`).
+/// What the Locker's ability editor needs to know (`gear_abilities_info`).
 #[derive(Serialize)]
 pub struct GearAbilitiesInfo {
-    /// The editor is shown: the installed engine declares `gear-abilities` and the ability list is known.
+    /// The sub-ability editor is shown: the installed engine declares `gear-abilities` and the ability list is known.
     pub supported: bool,
     /// The game is installed but its engine does not declare `gear-abilities` (or no ability list can be read): the
     /// Locker asks for a game update.
     pub update_needed: bool,
     /// The abilities a sub slot can hold, in the game's enum order (from the install's keys file, `game::subs`).
     pub abilities: Vec<String>,
+    /// The main ability slot is shown: the installed engine declares `main-abilities` and the ability list is known.
+    pub main_supported: bool,
+    /// The game is installed but its engine does not declare `main-abilities` (an engine from before it ignores the
+    /// choice without a word), or no ability list can be read: the Locker asks for a game update.
+    pub main_update_needed: bool,
+    /// The abilities a main slot can hold, in the game's enum order; which of them a part may take is what the game's
+    /// own pieces of that part have (`profile::part_main_abilities`, which the Locker computes from the catalogue too).
+    pub main_abilities: Vec<String>,
 }
 
-/// Whether the installed game applies sub abilities, and which abilities a sub slot can hold. The engine's capability
-/// list is read from its cached listing (it runs once per executable, with no window).
+/// Whether the installed game applies sub and main abilities, and which abilities a sub slot and a main slot can hold.
+/// The engine's capability list is read from its cached listing (it runs once per executable, with no window).
 #[tauri::command(async)]
 pub fn gear_abilities_info(state: St) -> GearAbilitiesInfo {
     let abilities = state.sub_capable().unwrap_or_default();
-    let engine_ok = match state.root() {
+    let mains = state.main_capable().unwrap_or_default();
+    let caps = match state.root() {
         Ok(root) if install::exe_path(&root).is_file() => {
             let cwd = install::userdata_dir(&root);
             let _ = std::fs::create_dir_all(&cwd);
             let lang = crate::proto::engine::list_lang(&state.cfg().language);
             let info = crate::proto::engine::engine_info_in(&state.data_dir, &install::exe_path(&root), &cwd, Some(lang));
-            Some(crate::proto::engine::caps(Some(&info)).gear_abilities)
+            Some(crate::proto::engine::caps(Some(&info)))
         }
         _ => None,
     };
-    gear_abilities_status(engine_ok, abilities)
+    gear_abilities_status(caps.as_ref().map(|c| c.gear_abilities), abilities, caps.as_ref().map(|c| c.main_abilities), mains)
 }
 
-/// The decision of [`gear_abilities_info`]: `engine_ok` is `None` without an installed game, else whether its engine
-/// declares the capability.
-fn gear_abilities_status(engine_ok: Option<bool>, abilities: Vec<String>) -> GearAbilitiesInfo {
+/// The decision of [`gear_abilities_info`]: `engine_ok` and `engine_main_ok` are `None` without an installed game, else
+/// whether its engine declares `gear-abilities` and `main-abilities`.
+fn gear_abilities_status(engine_ok: Option<bool>, abilities: Vec<String>, engine_main_ok: Option<bool>, mains: Vec<String>) -> GearAbilitiesInfo {
     let supported = engine_ok == Some(true) && !abilities.is_empty();
-    GearAbilitiesInfo { supported, update_needed: engine_ok.is_some() && !supported, abilities: if supported { abilities } else { Vec::new() } }
+    let main_supported = engine_main_ok == Some(true) && !mains.is_empty();
+    GearAbilitiesInfo {
+        supported,
+        update_needed: engine_ok.is_some() && !supported,
+        abilities: if supported { abilities } else { Vec::new() },
+        main_supported,
+        main_update_needed: engine_main_ok.is_some() && !main_supported,
+        main_abilities: if main_supported { mains } else { Vec::new() },
+    }
 }
 
 /// Validates and saves `profile.json`. The profile is applied to the game's save at the next launch (the runtime does
@@ -1225,6 +1253,34 @@ pub fn profile_save(state: St, profile: Profile) -> AppResult<Profile> {
     let clean = validated(&state, &profile)?;
     profile::save_profile(&state.data_dir, &clean)?;
     Ok(clean)
+}
+
+// ---- loadout presets (loadouts.rs) ---------------------------------------------------------------------------------
+
+/// The saved presets (an unreadable file is an empty list).
+#[tauri::command]
+pub fn loadouts_list(state: St) -> Vec<Preset> {
+    loadouts::load(&state.data_dir)
+}
+
+/// Saves the loadout under `name`; an existing preset of that name (any case) is replaced. The ids are checked against
+/// the game data like a profile's.
+#[tauri::command(async)]
+pub fn loadouts_save(state: St, name: String, loadout: Loadout) -> AppResult<Vec<Preset>> {
+    let view = catalogue_view(&state, false);
+    let (subs, mains) = (state.sub_capable(), state.main_capable());
+    let clean = loadouts::validate_loadout(&loadout, &view.catalogue, subs.as_deref(), mains.as_deref())?;
+    loadouts::save_preset(&state.data_dir, &name, clean)
+}
+
+#[tauri::command]
+pub fn loadouts_rename(state: St, from: String, to: String) -> AppResult<Vec<Preset>> {
+    loadouts::rename_preset(&state.data_dir, &from, &to)
+}
+
+#[tauri::command]
+pub fn loadouts_delete(state: St, name: String) -> AppResult<Vec<Preset>> {
+    loadouts::delete_preset(&state.data_dir, &name)
 }
 
 // ---- community servers by name (servers.rs) ----------------------------------------------------------------------
@@ -2234,17 +2290,34 @@ mod tests {
     #[test]
     fn the_sub_ability_editor_needs_the_engine_capability_and_the_ability_list() {
         let list = || vec!["Alpha".to_string(), "Beta".to_string()];
-        let g = gear_abilities_status(Some(true), list());
+        let g = gear_abilities_status(Some(true), list(), Some(true), list());
         assert_eq!((g.supported, g.update_needed, g.abilities.len()), (true, false, 2));
         // an engine without the capability: the game update is what the Locker asks for
-        let g = gear_abilities_status(Some(false), list());
+        let g = gear_abilities_status(Some(false), list(), Some(false), list());
         assert_eq!((g.supported, g.update_needed, g.abilities.len()), (false, true, 0));
         // the engine is fine but the ability list cannot be read (no keys file): not shown, and an update redoes it
-        let g = gear_abilities_status(Some(true), Vec::new());
+        let g = gear_abilities_status(Some(true), Vec::new(), Some(true), Vec::new());
         assert_eq!((g.supported, g.update_needed), (false, true));
         // no game installed: nothing to say
-        let g = gear_abilities_status(None, list());
+        let g = gear_abilities_status(None, list(), None, list());
         assert_eq!((g.supported, g.update_needed), (false, false));
+    }
+
+    #[test]
+    fn the_main_ability_slot_needs_its_own_engine_capability() {
+        let list = || vec!["Alpha".to_string(), "MainOnly".to_string()];
+        let g = gear_abilities_status(Some(true), list(), Some(true), list());
+        assert_eq!((g.main_supported, g.main_update_needed, g.main_abilities.len()), (true, false, 2));
+        // an engine that applies sub abilities but not the main one (built before it): the sub abilities stay, the main
+        // slot asks for the game update instead of letting the engine ignore the choice
+        let g = gear_abilities_status(Some(true), list(), Some(false), list());
+        assert_eq!((g.supported, g.main_supported, g.main_update_needed, g.main_abilities.len()), (true, false, true, 0));
+        // no ability list: not shown either
+        let g = gear_abilities_status(Some(true), list(), Some(true), Vec::new());
+        assert_eq!((g.main_supported, g.main_update_needed), (false, true));
+        // no game installed: nothing to say
+        let g = gear_abilities_status(None, list(), None, list());
+        assert_eq!((g.main_supported, g.main_update_needed), (false, false));
     }
 
     use super::*;

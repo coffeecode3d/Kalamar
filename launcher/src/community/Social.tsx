@@ -116,6 +116,12 @@ export function Friends() {
   useEffect(() => {
     void req("GET", "/v1/friends/requests").then(setRequests).catch(() => setRequests({ incoming: [], outgoing: [] }));
   }, [live.rev.friends]);
+  const [blocks, setBlocks] = useState<J[]>([]);
+  const [nb, setNb] = useState(0);
+  useEffect(() => {
+    if (!has("moderation")) return;
+    void req("GET", "/v1/blocks").then((r: J) => setBlocks(r.items ?? [])).catch(() => setBlocks([]));
+  }, [live.rev.friends, nb]);
   const refresh = () => { again(); void req("GET", "/v1/friends/requests").then(setRequests).catch(() => {}); };
   const myCode: string | null = live.me?.friend_code ?? null;
   return (
@@ -178,12 +184,27 @@ export function Friends() {
                 <Who user={f.user}><Presence id={f.user?.id} initial={f.presence} /></Who>
                 <span className="small muted grow">{f.since ? c("f.since", { date: fmtDay(f.since, lang) }) : ""}</span>
                 <button className="btn btn-small btn-ghost" disabled={a.busy} onClick={() => { if (window.confirm(c("f.remove.confirm", { name: f.user?.display_name ?? "" }))) void a.run(async () => { await req("DELETE", `/v1/friends/${encodeURIComponent(f.user.id)}`); again(); }); }}>{c("f.remove")}</button>
-                {has("moderation") && <button className="btn btn-small btn-ghost" disabled={a.busy} onClick={() => { if (window.confirm(c("f.block.confirm", { name: f.user?.display_name ?? "" }))) void a.run(async () => { await req("PUT", `/v1/blocks/${encodeURIComponent(f.user.id)}`); again(); }); }}>{c("f.block")}</button>}
+                {has("moderation") && <button className="btn btn-small btn-ghost" disabled={a.busy} onClick={() => { if (window.confirm(c("f.block.confirm", { name: f.user?.display_name ?? "" }))) void a.run(async () => { await req("PUT", `/v1/blocks/${encodeURIComponent(f.user.id)}`); again(); setNb((x) => x + 1); }); }}>{c("f.block")}</button>}
               </li>
             ))}
           </ul>
         )}
       </article>
+      {blocks.length > 0 && (
+        <article className="card">
+          <h2>{c("f.blocked")}</h2>
+          <p className="small muted">{c("f.blocked.lead")}</p>
+          <ul className="cm-list">
+            {blocks.map((b: J) => (
+              <li key={b.user?.id} className="cm-row">
+                <Who user={b.user} />
+                <span className="grow" />
+                <button className="btn btn-small btn-ghost" disabled={a.busy} onClick={() => void a.run(async () => { await req("DELETE", `/v1/blocks/${encodeURIComponent(b.user.id)}`); setNb((x) => x + 1); })}>{c("f.unblock")}</button>
+              </li>
+            ))}
+          </ul>
+        </article>
+      )}
     </div>
   );
 }

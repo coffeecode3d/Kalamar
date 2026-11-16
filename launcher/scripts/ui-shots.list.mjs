@@ -37,8 +37,10 @@ export const shots = [
   // ---- Locker -----------------------------------------------------------------------------------------------------
   { name: "locker-character", q: "page=profile", wait: 1200 },
   { name: "locker-gear", q: "page=profile", wait: 1200, steps: [click("#ptab-gear")] },
-  { name: "locker-gear-subs-picker", q: "page=profile", wait: 1200, steps: [click("#ptab-gear"), click(".sub-slot"), wait(400)] },
+  { name: "locker-gear-subs-picker", q: "page=profile", wait: 1200, steps: [click("#ptab-gear"), click(".abil-subs .sub-slot"), wait(400)] },
+  { name: "locker-gear-main-picker", q: "page=profile", wait: 1200, steps: [click("#ptab-gear"), click(".main-slot"), wait(400)] },
   { name: "locker-gear-subs-update", q: "page=profile&gear=old", wait: 1200, steps: [click("#ptab-gear")] },
+  { name: "locker-gear-main-update", q: "page=profile&gear=sub", wait: 1200, steps: [click("#ptab-gear")] },
   { name: "locker-weapon", q: "page=profile", wait: 1200, steps: [click("#ptab-weapon")] },
   { name: "locker-splashtag", q: "page=profile", wait: 1200, steps: [click("#ptab-splashtag")] },
   { name: "locker-titles", q: "page=profile", wait: 1200, steps: [click("#ptab-splashtag"), click(".tab-body .seg button:nth-child(2)")] },

@@ -620,6 +620,7 @@ int vk_fsr4_record(VkCommandBuffer cb, VkImage src, VkFormat fmt, int sw, int sh
     float vp[16], jx = 0, jy = 0, near = 0.2f, far = 2000.0f, fov = 0.9599f;
     if (!vk_dlaa_scene_data(&depth, &dfmt, &dw, &dh, vp, &jx, &jy, &near, &far, &fov)) return 0;
     if ((int)dw != sw || (int)dh != sh) return 0;                       // the scene must match the picture's size
+    if (to[2] < sw || to[3] < sh) return 0;                             // a smaller window is a downscale: the blit does it
     if (crop && (crop[0] || crop[1] || crop[2] != sw || crop[3] != sh)) return 0;   // a crop: not implemented yet
     if (!ensure_depth_view(depth, dfmt)) return 0;
     if (!mv_pass(cb, (uint32_t)sw, (uint32_t)sh, jx, jy, vp)) return 0;   // no history yet: FSR 1 this frame

@@ -202,8 +202,6 @@
         "fsr4",
         "fsr3",
         "fsr",
-        "dlss",
-        "dlaa",
         "bilinear"
       ],
       "label": {
@@ -213,10 +211,10 @@
         "ja": "アップスケーラー"
       },
       "help": {
-        "fr": "fsr4 : FSR 4.1 (temporel, le plus net ; nécessite le runtime AMD FidelityFX à côté de l'exécutable). fsr3 : FSR 3.1. fsr : FSR 1 (spatial). dlss/dlaa : NVIDIA. bilinear : simple. Utilisée quand la fenêtre est plus grande que la résolution du jeu.",
-        "en": "fsr4: FSR 4.1 (temporal, the sharpest; needs the AMD FidelityFX runtime next to the executable). fsr3: FSR 3.1. fsr: FSR 1 (spatial). dlss/dlaa: NVIDIA. bilinear: plain. Used when the window is larger than the game resolution.",
-        "es": "fsr4: FSR 4.1 (temporal, el más nítido; requiere el runtime AMD FidelityFX junto al ejecutable). fsr3: FSR 3.1. fsr: FSR 1 (espacial). dlss/dlaa: NVIDIA. bilinear: simple. Se usa cuando la ventana es mayor que la resolución del juego.",
-        "ja": "fsr4: FSR 4.1（時間方向、最もシャープ。実行ファイルの隣に AMD FidelityFX ランタイムが必要）。fsr3: FSR 3.1。fsr: FSR 1（空間）。dlss/dlaa: NVIDIA。bilinear: 単純拡大。ウィンドウがゲームの解像度より大きいときに使われます。"
+        "fr": "fsr4 : FSR 4.1 (temporel, le plus net ; nécessite le runtime AMD FidelityFX à côté de l'exécutable). fsr3 : FSR 3.1. fsr : FSR 1 (spatial). bilinear : simple. Utilisée quand la fenêtre est plus grande que la résolution du jeu.",
+        "en": "fsr4: FSR 4.1 (temporal, the sharpest; needs the AMD FidelityFX runtime next to the executable). fsr3: FSR 3.1. fsr: FSR 1 (spatial). bilinear: plain. Used when the window is larger than the game resolution.",
+        "es": "fsr4: FSR 4.1 (temporal, el más nítido; requiere el runtime AMD FidelityFX junto al ejecutable). fsr3: FSR 3.1. fsr: FSR 1 (espacial). bilinear: simple. Se usa cuando la ventana es mayor que la resolución del juego.",
+        "ja": "fsr4: FSR 4.1（時間方向、最もシャープ。実行ファイルの隣に AMD FidelityFX ランタイムが必要）。fsr3: FSR 3.1。fsr: FSR 1（空間）。bilinear: 単純拡大。ウィンドウがゲームの解像度より大きいときに使われます。"
       }
     },
     {
@@ -421,6 +419,25 @@
         "en": "auto: on for this game (the mouse aims like the pad's gyro), 1 forces it, 0 turns it off (the mouse is a right stick). Motion controls must be on in the game's options.",
         "es": "auto: activo para este juego (el ratón apunta como el giroscopio del mando), 1 lo fuerza, 0 lo desactiva (el ratón es el stick derecho). Los controles de movimiento deben estar activados en las opciones del juego.",
         "ja": "auto：このゲームではオン（マウスがコントローラーのジャイロのように照準します）、1で強制オン、0でオフ（マウスは右スティックになります）。ゲームのオプションでモーションコントロールを有効にしておく必要があります。"
+      }
+    },
+    {
+      "key": "mouse_native",
+      "section": "mouse",
+      "ini_section": "input",
+      "type": "bool",
+      "default": "1",
+      "label": {
+        "fr": "Visée souris native",
+        "en": "Native mouse aiming",
+        "es": "Puntería nativa con ratón",
+        "ja": "ネイティブマウス照準"
+      },
+      "help": {
+        "fr": "La souris tourne la visée directement, sans le lissage que le jeu applique au gyroscope. 0 revient à l'ancien comportement. Sans effet sur le gyroscope d'une manette.",
+        "en": "The mouse turns the aim directly, without the smoothing the game applies to the gyro. 0 goes back to the older behaviour. A controller's gyro is not affected.",
+        "es": "El ratón gira la puntería directamente, sin el suavizado que el juego aplica al giroscopio. 0 vuelve al comportamiento anterior. No afecta al giroscopio de un mando.",
+        "ja": "マウスの動きがそのまま照準に反映され、ゲームがジャイロにかける補正はかかりません。0で以前の動作に戻ります。コントローラーのジャイロには影響しません。"
       }
     },
     {

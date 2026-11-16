@@ -1071,6 +1071,77 @@ int save_profile_gear_abilities_check(const char *json, const char *enum_s, int6
     return mask;
 }
 
+// ---- main_abilities: the main ability of the equipped head, clothes and shoes.
+// A piece's main ability is its ownership record's MainSkill, an ability enum value (a new record gets the gear table's,
+// make_record). The ones a part may take are those the game's own player gear of that part has as its main ability (the
+// Skill of the GearInfo<Part> rows that are not HowToGet Impossible): every ability a sub slot can hold, and the
+// main-only ones of that part. docs/save-profile.md, "Main abilities", says what the game does with the others.
+#define ABILITY_VALUES 256
+typedef struct { uint8_t on[3][ABILITY_VALUES]; } MainSets;   // on[part][value]: a main ability of that part's gear
+
+// The profile's main_abilities against the enum string e and the parts' sets (NULL: any value of the enum from 0):
+// has[part] and main_v[part]. NULL when it is absent or well formed, else what is wrong (in why).
+static const char *gear_main_parse(const Json *J, const char *e, const MainSets *sets, int has[3], int64_t main_v[3],
+                                   char *why, size_t cap) {
+    memset(has, 0, 3 * sizeof *has);
+    const Json *ma = jget(J, "main_abilities");
+    if (!ma || ma->kind == J_NULL) return NULL;
+    if (ma->kind != J_OBJ) return "main_abilities must be an object {\"head\": a, \"clothes\": b, \"shoes\": c}";
+    for (int i = 0; i < ma->n; i++) {
+        int known = 0;
+        for (int g = 0; g < 3; g++) known |= !strcmp(ma->kids[i].key, gear_part_names[g]);
+        if (!known) return snprintf(why, cap, "main_abilities has an unknown part \"%.40s\" (head, clothes, shoes)", ma->kids[i].key), why;
+    }
+    if (!e) return "the ability names were not found in main";
+    for (int g = 0; g < 3; g++) {
+        const Json *x = jget(ma, gear_part_names[g]);
+        int64_t v;
+        if (!x || x->kind == J_NULL) continue;
+        if (x->kind == J_STR) {
+            v = enum_value(e, x->str);
+            if (v == -2)
+                return snprintf(why, cap, "main_abilities.%s: the game has no ability named \"%.40s\"", gear_part_names[g],
+                                x->str), why;
+        } else if (x->kind == J_NUM && x->num == (double)(int64_t)x->num) {
+            v = (int64_t)x->num;
+            if (!enum_has(e, v))
+                return snprintf(why, cap, "main_abilities.%s: %lld is not a value of the game's ability enum",
+                                gear_part_names[g], (long long)v), why;
+        } else {
+            return snprintf(why, cap, "main_abilities.%s must be an ability name or an enum value", gear_part_names[g]), why;
+        }
+        if (v < 0)
+            return snprintf(why, cap, "main_abilities.%s: a main slot is never empty (null leaves the piece's own)",
+                            gear_part_names[g]), why;
+        if (sets && (v >= ABILITY_VALUES || !sets->on[g][v]))
+            return snprintf(why, cap, "main_abilities.%s: ability %lld is not the main ability of any %s piece of the game",
+                            gear_part_names[g], (long long)v, gear_part_names[g]), why;
+        main_v[g] = v;
+        has[g] = 1;
+    }
+    return NULL;
+}
+
+int save_profile_main_abilities_check(const char *json, const char *enum_s, const int64_t *const allowed[3],
+                                      int64_t main_v[3], char *why, size_t cap) {
+    MainSets sets;
+    memset(&sets, 0, sizeof sets);
+    for (int g = 0; allowed && g < 3; g++)
+        for (const int64_t *a = allowed[g]; a && *a != -2; a++)
+            if (*a >= 0 && *a < ABILITY_VALUES) sets.on[g][*a] = 1;
+    Json j;
+    int has[3] = {0}, mask = -1;
+    char buf[200] = "";
+    jp = json;
+    const char *bad = json_parse(&j) && j.kind == J_OBJ
+                          ? gear_main_parse(&j, enum_s, allowed ? &sets : NULL, has, main_v, buf, sizeof buf)
+                          : "not a JSON object";
+    if (!bad) mask = has[0] | has[1] << 1 | has[2] << 2;
+    if (why && cap) snprintf(why, cap, "%s", bad ? bad : "");
+    json_free(&j);
+    return mask;
+}
+
 typedef struct { const char *part, *table, *equip, *map; } GearPart;
 static const GearPart gear_parts[] = {
     {"head", "GearInfoHead", "GearHeadId", "HaveGearHeadMap"},
@@ -1256,6 +1327,47 @@ static int apply_gear_abilities(const Json *J, Plain *p, Log *l) {
     return 1;
 }
 
+// main_abilities: the main ability of the equipped pieces (the save's Coordinates, after the profile's gear), written
+// into the MainSkill of their records in the player data's ownership maps. The sets of each part are read from the gear
+// tables only when the profile names a main ability.
+static int apply_main_abilities(const Json *J, Plain *p, Log *l) {
+    const Json *ma = jget(J, "main_abilities");
+    if (!ma || ma->kind == J_NULL) return 1;
+    MainSets sets;
+    memset(&sets, 0, sizeof sets);
+    const char *e = ability_enum();
+    for (int g = 0; e && g < 3; g++) {
+        Table t;
+        if (!table_load(&t, gear_parts[g].table)) return fail("an RSDB gear table is unreadable", g);
+        for (uint32_t k = 0; k < t.nrows; k++) {
+            int64_t v = strcmp(row_str(&t, k, "HowToGet"), "Impossible") ? enum_value(e, row_str(&t, k, "Skill")) : -1;
+            if (v >= 0 && v < ABILITY_VALUES) sets.on[g][v] = 1;
+        }
+        free(t.b);
+    }
+    int has[3];
+    int64_t main_v[3];
+    char why[200];
+    const char *bad = gear_main_parse(J, e, &sets, has, main_v, why, sizeof why);
+    if (bad) return fail(bad, 0);
+    for (int g = 0; g < 3; g++) {
+        if (!has[g]) continue;
+        const GearPart *gp = &gear_parts[g];
+        char q[96];
+        int64_t id;
+        if (!current(p, gp->equip, &id)) return fail("the save has no equipped gear where 11.2.0 has it", g);
+        snprintf(q, sizeof q, "1/%s", gp->map);
+        Mp *s = mp_get(mp_get(path(p, q), id), name_hash("MainSkill"));
+        if (!s || s->kind != M_INT)
+            return fail("main_abilities: the save does not own the equipped gear (give it in \"gear\" too)", id);
+        if (s->i != main_v[g]) {
+            note(l, " 1/%s[%lld]/MainSkill %lld->%lld;", gp->map, (long long)id, (long long)s->i, (long long)main_v[g]);
+            s->i = main_v[g];
+        }
+    }
+    return 1;
+}
+
 // chunks: "max" or a count 0..CHUNKS_MAX: the player data's HaveSkillChipMap gets that count for every ability a sub
 // slot can hold (the enum's values below SUB_ABILITY_END). Separate from gear_abilities.
 #define CHUNKS_MAX 999
@@ -1372,7 +1484,7 @@ static int apply(const Profile *pr, Plain *p, Log *l) {
             set_int(p, l, eq, 0);
         }
     }
-    if (!apply_gear_abilities(J, p, l) || !apply_chunks(J, p, l)) return 0;
+    if (!apply_gear_abilities(J, p, l) || !apply_main_abilities(J, p, l) || !apply_chunks(J, p, l)) return 0;
     // Win emote.
     int64_t e;
     int has_e = jint(J, "emote", &e);

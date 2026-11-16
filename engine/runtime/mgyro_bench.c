@@ -6,7 +6,10 @@
 // then on each six-axis read of the game logs those vectors with the controller's own yaw and pitch.
 //
 // <tests>: "all" or a list (commas or spaces) of look, idle, lin, step, phase, rate, rt, fields, pitchyaw, yawaxis,
-// reverse, cap, recenter, limits, hitch, fps, image; the finder always runs first, after a Y that recentres the camera.
+// reverse, cap, recenter, limits, hitch, fps, image, circle, vsine, squid, drift, ink, wall, pokecmp, native, sweep,
+// surface, surfacenew, surfacegame, swim, situ1, situ2, flick, walk; the finder always runs first, after a Y that
+// recentres the camera. "match" or "matchold" alone runs the match test without the finder. TOTK_MGYRO_BENCH_OBJ,
+// _FIELDS and _POKE: below (watches, pokes).
 // TOTK_MGYRO_BENCH_OUT: the CSV file (default mgyro-bench.csv);
 // TOTK_MGYRO_BENCH_DELAY: seconds after the first live six-axis read before the bench starts (default 40, the test
 // range is up by then); TOTK_MGYRO_BENCH_EXIT=1 closes the game when the tests are done. tools/mgyro_bench.py turns the
@@ -23,6 +26,11 @@
 //                                                    count sent so far, and the aim vectors now
 //   P,<present>,<t>,<slot>,<read>                    the game's present call and the display time it is held to
 //   F,<slot>,<t>                                     the host present of that frame
+//   W,<read>,<values>                                the watched fields (TOTK_MGYRO_BENCH_FIELDS)
+//   N,<read>,<curve>,<out>,<view>,<want>,<target>,<gain>,<slope>,<resync>,<now>,<step>,<seen>,<base1>,<base2>,<ctrl>,
+//     <latent>,<flags>,<calls>
+//                                                    mouse_native's linear pitch in the frame before the read
+//                                                    (mouse_native.h MouseNativePitch)
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -31,10 +39,13 @@
 
 #include "cfg.h"
 #include "gfx.h"
+#include "gfx_wsys.h"
 #include "host.h"
 #include "input.h"
 #include "mgyro_bench.h"
+#include "mouse_native.h"
 #include "platform/platform.h"
+#include "ui/menu.h"
 
 enum { AIMS = 10, SRING = 8192 };
 
@@ -57,7 +68,7 @@ static volatile int32_t closed;   // the bench is done: nothing more is kept
 static void out(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void out(const char *fmt, ...) {
     if (__atomic_load_n(&closed, __ATOMIC_RELAXED)) return;
-    char line[640];
+    char line[1600];
     va_list ap;
     va_start(ap, fmt);
     int printed = vsnprintf(line, sizeof line, fmt, ap);
@@ -90,9 +101,12 @@ static void out_flush(void) {
     if (ofile) fflush(ofile);
 }
 
-// ---- the simulated mouse: one move at a time, its counts sent as packets at the polling rate
+// ---- the simulated mouse: one move at a time, its counts sent as packets at the polling rate. A straight move sends
+// (nx, ny) over dur; a circle (radius > 0) goes round radius counts from where it starts, cycles times in dur, clockwise
+// on screen from its rightmost point (x right, then y down), and ends where it started.
 static PlatMutex mv_lock = PLAT_MUTEX_INIT;
-static struct { int active; uint64_t t0, dur; double rate; int32_t nx, ny, sx, sy; } mv;   // sx, sy: sent so far
+// xscale: the circle's horizontal radius over its vertical one (0: up and down only); sx, sy: sent so far
+static struct { int active; uint64_t t0, dur; double rate, radius, cycles, xscale; int32_t nx, ny, sx, sy; } mv;
 static int64_t inj_x, inj_y;   // every count sent (mv_lock)
 
 void mgb_take(uint64_t now, double *dx, double *dy) {
@@ -106,6 +120,10 @@ void mgb_take(uint64_t now, double *dx, double *dy) {
             if (frac > 1) frac = 1;
         }
         int32_t tx = (int32_t)lround(mv.nx * frac), ty = (int32_t)lround(mv.ny * frac);
+        if (mv.radius > 0) {   // the point on the circle at this packet, relative to the start
+            double a = 2 * M_PI * mv.cycles * frac;
+            tx = (int32_t)lround(mv.radius * mv.xscale * (cos(a) - 1)), ty = (int32_t)lround(mv.radius * sin(a));
+        }
         int32_t ddx = tx - mv.sx, ddy = ty - mv.sy;
         mv.sx = tx, mv.sy = ty;
         if (frac >= 1) mv.active = 0;
@@ -182,6 +200,106 @@ static volatile int32_t started;
 
 static void bench_main(void *arg);
 
+// ---- watches: objects of the game taken at a function's entry, and floats of them logged after each read.
+// TOTK_MGYRO_BENCH_OBJ: main offsets (hex) of functions whose x0 on entry is the object to watch, object k being the
+// k-th function's; TOTK_MGYRO_BENCH_FIELDS: <k>+<hex offset>[*<n>] entries, n floats (default 1) of object k at that
+// offset. Each read then adds W,<read>,<values> (nan until the object is known). The function-entry hook runs only
+// while the bench looks for the objects (watch_find), since every lifted function calls it then.
+enum { WOBJ = 8, WFIELDS = 64, WSEEN = 4 };
+static uint64_t wfn[WOBJ];
+static uint64_t wseen[WOBJ][WSEEN];   // the distinct objects seen per function, the first one watched
+static volatile uint64_t wobj[WOBJ];
+static int nwfn, nwf;
+static struct { int k; uint32_t off, n; } wf[WFIELDS];
+static PlatMutex w_lock = PLAT_MUTEX_INIT;
+
+static uint64_t main_base(void) { return ldr_count() ? ldr_module(0)->base : 0; }
+
+static void watch_parse(void) {
+    const char *o = cfg_get("TOTK_MGYRO_BENCH_OBJ"), *f = cfg_get("TOTK_MGYRO_BENCH_FIELDS");
+    for (const char *p = o; p && *p && nwfn < WOBJ;) {
+        char *end;
+        unsigned long long off = strtoull(p, &end, 16);
+        if (end == p) break;
+        wfn[nwfn++] = main_base() + off;
+        p = end + (*end == ',');
+    }
+    for (const char *p = f; p && *p && nwf < WFIELDS;) {
+        int k, used = 0;
+        unsigned off, n = 1;
+        if (sscanf(p, "%d+%x%n", &k, &off, &used) != 2 || k < 0 || k >= nwfn) break;
+        p += used;
+        if (*p == '*') {
+            char *end;
+            n = (unsigned)strtoul(p + 1, &end, 10);
+            p = end;
+        }
+        wf[nwf].k = k, wf[nwf].off = off, wf[nwf].n = n < 1 ? 1 : n > 16 ? 16 : n;
+        nwf++;
+        while (*p && *p != ',') p++;
+        p += *p == ',';
+    }
+}
+
+void mgb_fn_hit(uint64_t addr, uint64_t x0) {
+    for (int k = 0; k < nwfn; k++) {
+        if (addr != wfn[k] || !x0) continue;
+        plat_mutex_lock(&w_lock);
+        for (int i = 0; i < WSEEN; i++) {
+            if (wseen[k][i] == x0) break;
+            if (!wseen[k][i]) {
+                wseen[k][i] = x0;
+                if (!i) __atomic_store_n(&wobj[k], x0, __ATOMIC_RELEASE);
+                break;
+            }
+        }
+        plat_mutex_unlock(&w_lock);
+    }
+}
+
+static void watch_line(int64_t r) {
+    if (!nwf) return;
+    char line[1500];
+    int k = snprintf(line, sizeof line, "W,%lld", (long long)r);
+    for (int i = 0; i < nwf && k < (int)sizeof line - 24; i++) {
+        uint64_t o = __atomic_load_n(&wobj[wf[i].k], __ATOMIC_ACQUIRE), a = o + wf[i].off;
+        int ok = o && mem_guest_readable(a, 4ull * wf[i].n);
+        for (uint32_t j = 0; j < wf[i].n && k < (int)sizeof line - 24; j++)
+            k += snprintf(line + k, sizeof line - (size_t)k, ok ? ",%.7g" : ",nan",
+                          ok ? (double)((const float *)(uintptr_t)a)[j] : 0.0);
+    }
+    out("%s", line);
+}
+
+// ---- pokes: TOTK_MGYRO_BENCH_POKE=<main hex offset>=<hex byte>[,...], bytes of main's data the pokecmp test writes
+// for its second half and puts back after: switches of the game, to compare its behavior with and without them
+enum { NPOKE = 8 };
+static struct { uint64_t off; uint8_t val, orig; } pk[NPOKE];
+static int npk;
+
+static void poke_parse(void) {
+    for (const char *p = cfg_get("TOTK_MGYRO_BENCH_POKE"); p && *p && npk < NPOKE;) {
+        unsigned long long off;
+        unsigned v;
+        int used = 0;
+        if (sscanf(p, "%llx=%x%n", &off, &v, &used) != 2) break;
+        pk[npk].off = off, pk[npk].val = (uint8_t)v, npk++;
+        p += used;
+        p += *p == ',';
+    }
+}
+
+static void poke_apply(int on) {
+    for (int i = 0; i < npk; i++) {
+        uint64_t a = main_base() + pk[i].off;
+        if (!mem_guest_readable(a, 1)) continue;
+        volatile uint8_t *b = (volatile uint8_t *)(uintptr_t)a;
+        if (on) pk[i].orig = *b, *b = pk[i].val;
+        else *b = pk[i].orig;
+        out("H,poke,main+%#llx=%#x", (unsigned long long)pk[i].off, (unsigned)*b);
+    }
+}
+
 void mgb_read(const MotionState *s, int n, uint64_t now) {
     if (!mgb_on()) return;
     if (!__atomic_load_n(&started, __ATOMIC_RELAXED) && !plat_xchg32(&started, 1))
@@ -205,6 +323,11 @@ void mgb_read(const MotionState *s, int n, uint64_t now) {
     out("R,%lld,%llu,%lld,%lld,%llu,%.6f,%.6f,%lld,%lld%s", (long long)r, (unsigned long long)now, (long long)s0,
         (long long)(s0 - last_s0), (unsigned long long)__atomic_load_n(&presents, __ATOMIC_RELAXED), cy, cp,
         (long long)ix, (long long)iy, aims);
+    watch_line(r);
+    MouseNativePitch np = mouse_native_pitch_debug();   // the linear pitch's previous frame (mouse_native.c)
+    out("N,%lld,%.6f,%.6f,%.4f,%.4f,%.4f,%.5f,%.5f,%d,%.6f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%u", (long long)r, np.game,
+        np.out, np.view, np.want, np.target, np.gain, np.slope, np.resync, np.now, np.step, np.seen, np.base1, np.base2,
+        np.ctrl, np.latent, np.flags, np.calls);
     last_s0 = s0;
     uint64_t lr = __atomic_load_n(&last_read_ns, __ATOMIC_RELAXED);
     if (lr && now > lr && now - lr < 100000000ull) {   // the frame period, smoothed over about 16 reads
@@ -238,6 +361,42 @@ void mgb_flip(uint64_t slot, uint64_t now) {
     out("F,%llu,%llu", (unsigned long long)slot, (unsigned long long)now);
 }
 
+void mgb_mark(const char *what, uint64_t v) {
+    if (!mgb_on()) return;
+    out("M,%llu,%s,%u,%llx", (unsigned long long)kern_now_ns(), what, plat_thread_id(), (unsigned long long)v);
+}
+
+static volatile int32_t detail;
+int mgb_detail(void) { return __atomic_load_n(&detail, __ATOMIC_RELAXED); }
+static int64_t nreads_now(void) { return __atomic_load_n(&reads, __ATOMIC_ACQUIRE); }
+
+void mgb_mark2(const char *what, uint64_t a, uint64_t b) {
+    if (!mgb_on()) return;
+    out("M,%llu,%s,%u,%llx,%llx", (unsigned long long)kern_now_ns(), what, plat_thread_id(), (unsigned long long)a,
+        (unsigned long long)b);
+}
+
+// The detail window: until n more reads, poll the aim vectors and log "A,<t>,<aim>,<x>,<y>,<z>" each time one changes,
+// so the timeline shows when each copy of the view takes a turn.
+static void detail_poll(int64_t n) {
+    int64_t target = nreads_now() + n;
+    float last[AIMS][3];
+    int na = __atomic_load_n(&naims, __ATOMIC_ACQUIRE);
+    for (int i = 0; i < na; i++) memcpy(last[i], (const void *)(uintptr_t)aim_addr[i], sizeof last[i]);
+    uint64_t t0 = kern_now_ns();
+    while (nreads_now() < target && kern_now_ns() - t0 < 5000000000ull) {
+        for (int i = 0; i < na; i++) {
+            float v[3];
+            memcpy(v, (const void *)(uintptr_t)aim_addr[i], sizeof v);
+            if (memcmp(v, last[i], sizeof v)) {
+                memcpy(last[i], v, sizeof v);
+                out("A,%llu,%d,%.6f,%.6f,%.6f", (unsigned long long)kern_now_ns(), i, v[0], v[1], v[2]);
+            }
+        }
+        plat_yield();
+    }
+}
+
 // ---- the bench thread
 static void ev(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void ev(const char *fmt, ...) {
@@ -265,7 +424,15 @@ static void move_start(int nx, int ny, double cps, double rate, uint64_t t0) {
     double n = fmax(fabs((double)nx), fabs((double)ny));
     plat_mutex_lock(&mv_lock);
     mv.active = 1, mv.t0 = t0 ? t0 : kern_now_ns(), mv.dur = cps > 0 ? (uint64_t)(n / cps * 1e9) : 0;
-    mv.rate = rate, mv.nx = nx, mv.ny = ny, mv.sx = mv.sy = 0;
+    mv.rate = rate, mv.nx = nx, mv.ny = ny, mv.sx = mv.sy = 0, mv.radius = 0, mv.cycles = 0, mv.xscale = 1;
+    plat_mutex_unlock(&mv_lock);
+}
+
+// cycles turns of a circle of radius counts, each in period seconds, packets at rate Hz
+static void circle_start(double radius, double period, double cycles, double rate, double xscale) {
+    plat_mutex_lock(&mv_lock);
+    mv.active = 1, mv.t0 = kern_now_ns(), mv.dur = (uint64_t)(period * cycles * 1e9);
+    mv.rate = rate, mv.nx = mv.ny = 0, mv.sx = mv.sy = 0, mv.radius = radius, mv.cycles = cycles, mv.xscale = xscale;
     plat_mutex_unlock(&mv_lock);
 }
 
@@ -695,6 +862,23 @@ static void t_limits(void) {
     ev("lim level");
 }
 
+// The pitch over its whole range in small steps: after a Y, up in 25-count steps (1 degree of controller pitch at
+// 0.04) until 70 steps, down 140, up 70, each step settled for 12 reads, so the aim's degrees per count can be read
+// as a function of where it points, both ways.
+static void t_sweep(void) {
+    input_inject("Y 6");
+    wait_reads(90);
+    static const struct { int steps, dy; } seq[] = {{70, -25}, {140, 25}, {70, -25}};
+    for (size_t s = 0; s < sizeof seq / sizeof *seq; s++)
+        for (int k = 1; k <= seq[s].steps; k++) {
+            move(0, seq[s].dy, 2500, 1000);
+            wait_reads(12);
+            ev("sweep leg=%zu step=%d dy=%d", s, k, seq[s].dy);
+        }
+    settle();
+    ev("end");
+}
+
 static void t_hitch(void) {
     static const int64_t ms[] = {50, 100, 150};
     for (int sgn = 1; sgn >= -1; sgn -= 2) {
@@ -757,13 +941,532 @@ static void t_image(void) {
     shots_setup();
     for (int sgn = 1; sgn >= -1; sgn -= 2) {
         ev("image n=%d", sgn * 400);
+        const char *dt = cfg_get("TOTK_MGYRO_BENCH_DETAIL");
+        int det = dt && atoi(dt);
+        if (det) __atomic_store_n(&detail, 1, __ATOMIC_RELAXED);
         __atomic_store_n(&shots_left, 16, __ATOMIC_RELAXED);
-        wait_reads(3);
-        move(sgn * 400, 0, 0, 1000);
-        wait_reads(16);
+        if (det) detail_poll(3);
+        else wait_reads(3);
+        move_start(sgn * 400, 0, 0, 1000, 0);
+        if (det) detail_poll(16);
+        move_wait();
+        if (!det) wait_reads(16);
+        __atomic_store_n(&detail, 0, __ATOMIC_RELAXED);
         settle();
         ev("end");
     }
+}
+
+// The mouse along circles: radius counts (250 is 10 degrees of controller turn at 0.04), a period from 2 s to 0.33 s,
+// clockwise on screen. A 1:1 aim draws the same circle, delayed by the input lag only; tools read its shape from the
+// injected counts and the aim vectors read by read. Each circle starts after a Y, from a level camera, so it stays
+// inside the pitch limits whatever the test before left.
+static void level_camera(void) {
+    input_inject("Y 6");
+    wait_reads(90);
+}
+
+static void circle_run(double radius, double period, double cycles, const char *tag) {
+    level_camera();
+    ev("circle r=%g period=%g cycles=%g%s", radius, period, cycles, tag);
+    circle_start(radius, period, cycles, 1000, 1);
+    move_wait();
+    settle();
+    ev("end");
+}
+
+static void t_circle(void) {
+    static const struct { double r, period, cycles; } c[] = {
+        {250, 2, 2}, {250, 1, 3}, {250, 0.5, 4}, {250, 0.333, 6}, {60, 0.5, 4}};
+    for (size_t i = 0; i < sizeof c / sizeof *c; i++) circle_run(c[i].r, c[i].period, c[i].cycles, "");
+}
+
+// The mouse up and down only, the vertical of a circle (radius counts each way from where it starts): the pitch alone,
+// over a wide part of its range at 500 counts, with no yaw to mix in. Each starts from a level camera.
+static void t_vsine(void) {
+    static const struct { double r, period, cycles; } c[] = {{250, 1, 3}, {500, 2, 2}, {500, 1, 3}, {60, 0.5, 4}};
+    for (size_t i = 0; i < sizeof c / sizeof *c; i++) {
+        level_camera();
+        ev("vsine r=%g period=%g cycles=%g", c[i].r, c[i].period, c[i].cycles);
+        circle_start(c[i].r, c[i].period, c[i].cycles, 1000, 0);
+        move_wait();
+        settle();
+        ev("end");
+    }
+}
+
+// mgb_native_keep: -1 leaves mouse_native.c's own choice
+static volatile int32_t keep_set = -1;
+int mgb_native_keep(int def) {
+    int v = __atomic_load_n(&keep_set, __ATOMIC_RELAXED);
+    return v >= 0 ? v : def;
+}
+
+// mgb_native_ref: -1 leaves mouse_native.c's own choice
+static volatile int32_t ref_set = -1;
+int mgb_native_ref(int def) {
+    int v = __atomic_load_n(&ref_set, __ATOMIC_RELAXED);
+    return v >= 0 ? v : def;
+}
+
+// mgb_native_hold: -1 leaves mouse_native.c's own choice
+static volatile int32_t hold_resync_set = -1;
+int mgb_native_hold(int def) {
+    int v = __atomic_load_n(&hold_resync_set, __ATOMIC_RELAXED);
+    return v >= 0 ? v : def;
+}
+
+// Squid form and back (ZL held, then let go of) while the mouse turns, from a level camera, near the top limit and near
+// the bottom one: in each form a yaw step of 100 counts and a pitch step of 50 (their signs alternate, so the view
+// stays where it is), and a small circle (60 counts in 0.5 s) across each switch, so the mouse moves on both axes while
+// the form changes. 17 cycles at each place: 51 switches each way. The hold of ZL ends halfway through the circle that
+// follows the squid half. First with mouse_native.c's keeping of the game's pitch and of the controller off
+// (mgb_native_keep), 6 cycles at each place, to compare, then on.
+static void t_squid(void) {
+    static const struct { const char *at; int dy; } place[] = {{"level", 0}, {"top", -640}, {"bottom", 620}};
+    for (int keep = 0; keep < 2; keep++) {
+        __atomic_store_n(&keep_set, keep, __ATOMIC_RELAXED);
+        for (size_t p = 0; p < sizeof place / sizeof *place; p++) {
+            level_camera();
+            if (place[p].dy) move(0, place[p].dy, 2500, 1000);
+            wait_reads(20);
+            for (int k = 0; k < (keep ? 17 : 6); k++) {
+                int s = k & 1 ? -1 : 1;
+                for (int form = 0; form < 2; form++) {
+                    const char *f = form ? "squid" : "human";
+                    ev("squid keep=%d at=%s cycle=%d form=%s axis=x n=%d", keep, place[p].at, k, f, 100 * s);
+                    move(100 * s, 0, 0, 1000);
+                    wait_reads(15);
+                    ev("end");
+                    ev("squid keep=%d at=%s cycle=%d form=%s axis=y n=%d", keep, place[p].at, k, f, 50 * s);
+                    move(0, 50 * s, 0, 1000);
+                    wait_reads(15);
+                    ev("end");
+                    ev("squid keep=%d at=%s cycle=%d switch=%s", keep, place[p].at, k, form ? "human" : "squid");
+                    if (!form) input_inject("ZL 92");
+                    circle_start(60, 0.5, 1, 1000, 1);
+                    move_wait();
+                    wait_reads(15);
+                }
+            }
+        }
+    }
+    __atomic_store_n(&keep_set, -1, __ATOMIC_RELAXED);
+    ev("squid done");
+}
+
+// Counts that turn the view by deg at the game's yaw gain at the bench profile's motion sensitivity (2.3933 camera
+// degrees per degree of controller turn).
+static int view_counts(double deg) { return (int)lround(deg / (input_mouse_gyro_deg_per_count() * 2.3933)); }
+
+// The view pushed past its bottom limit again and again, a third of each push taken back (1500 counts down, 500 up,
+// eight times), then a step each way on both axes; once more past the limit and 100 counts back, and the steps again;
+// then a Y, which should level the view. The same at the top. A virtual controller that keeps tilting while the view
+// rests at a limit ends at its own limit (mouse_gyro_pitch), where it no longer tilts that way and, close to 90 degrees,
+// its yaw no longer turns the camera. With mouse_native.c's keeping off (mgb_native_keep) then on.
+static void t_drift(void) {
+    static const struct { int x, y; } st[] = {{100, 0}, {-100, 0}, {0, 50}, {0, -50}};
+    for (int keep = 0; keep < 2; keep++) {
+        __atomic_store_n(&keep_set, keep, __ATOMIC_RELAXED);
+        for (int top = 0; top < 2; top++) {
+            const char *at = top ? "top" : "bottom";
+            level_camera();
+            int s = top ? -1 : 1;   // counts y > 0 look down
+            for (int k = 0; k < 8; k++) {
+                move(0, 1500 * s, 2500, 1000);
+                move(0, -500 * s, 2500, 1000);
+                wait_reads(5);
+            }
+            for (int pass = 0; pass < 2; pass++) {
+                if (pass) move(0, 1500 * s, 2500, 1000), move(0, -100 * s, 2500, 1000);
+                wait_reads(20);
+                for (size_t i = 0; i < sizeof st / sizeof *st; i++) {
+                    ev("drift keep=%d at=%s pass=%d axis=%c n=%d", keep, at, pass, st[i].x ? 'x' : 'y',
+                       st[i].x ? st[i].x : st[i].y);
+                    move(st[i].x, st[i].y, 0, 1000);
+                    wait_reads(15);
+                    ev("end");
+                }
+            }
+            level_camera();
+            ev("drift keep=%d at=%s after Y", keep, at);
+        }
+    }
+    __atomic_store_n(&keep_set, -1, __ATOMIC_RELAXED);
+}
+
+// Swimming up a wall: the view turned 90 degrees left, toward the brick wall of the test range's corridor, the wall
+// inked (ZR held 2.5 s), then ZL and the left stick forward for 5 s, the squid going to the wall and up it, with steps
+// of 100 counts each way on both axes while it swims.
+static void t_wall(void) {
+    static const struct { int x, y; } st[] = {{100, 0}, {-100, 0}, {0, 100}, {0, -100}};
+    level_camera();
+    move(-view_counts(90), 0, 2500, 1000);
+    wait_reads(10);
+    input_inject("ZR 150");
+    wait_reads(170);
+    input_inject("ZL 300");
+    input_inject("LSTICK 0 32767 300");
+    wait_reads(20);
+    for (int rep = 0; rep < 2; rep++)
+        for (size_t i = 0; i < sizeof st / sizeof *st; i++) {
+            ev("wall form=squid rep=%d axis=%c n=%d", rep, st[i].x ? 'x' : 'y', st[i].x ? st[i].x : st[i].y);
+            move(st[i].x, st[i].y, 0, 1000);
+            wait_reads(15);
+            ev("end");
+        }
+    wait_reads(200);
+    ev("wall done");
+}
+
+// Squid form in ink. The floor around the player is inked first (the view 60 degrees down, ZR held while it turns round
+// once in 3 s); then, from a level camera, in each form: steps of 100 counts each way on both axes, and pictures at rest,
+// after 50 counts right and after 50 counts up (each taken back), whose shifts compare the two axes on screen whatever
+// the camera reports. ZL is held through the whole squid half.
+static void t_ink(void) {
+    static const struct { int x, y; } st[] = {{100, 0}, {-100, 0}, {0, 100}, {0, -100}};
+    static const struct { int x, y; } sh[] = {{0, 0}, {50, 0}, {0, -50}};
+    level_camera();
+    int down = view_counts(60), turn = view_counts(360);
+    move(0, down, 2500, 1000);
+    input_inject("ZR 200");
+    move(turn, 0, turn / 3.0, 1000);
+    wait_reads(40);
+    move(0, -down, 2500, 1000);
+    level_camera();
+    shots_setup();
+    for (int form = 0; form < 2; form++) {
+        const char *f = form ? "squid" : "human";
+        if (form) {
+            input_inject("ZL 500");
+            wait_reads(40);
+        }
+        for (int rep = 0; rep < 2; rep++) {
+            for (size_t i = 0; i < sizeof st / sizeof *st; i++) {
+                ev("ink form=%s axis=%c n=%d", f, st[i].x ? 'x' : 'y', st[i].x ? st[i].x : st[i].y);
+                move(st[i].x, st[i].y, 0, 1000);
+                wait_reads(15);
+                ev("end");
+            }
+            for (size_t i = 0; i < sizeof sh / sizeof *sh; i++) {
+                if (sh[i].x || sh[i].y) move(sh[i].x, sh[i].y, 0, 1000);
+                wait_reads(20);
+                ev("ink form=%s shot dx=%d dy=%d", f, sh[i].x, sh[i].y);
+                __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
+                wait_reads(5);
+                if (sh[i].x || sh[i].y) move(-sh[i].x, -sh[i].y, 0, 1000);
+            }
+        }
+        if (form) wait_reads(220);   // ZL let go of
+    }
+    ev("ink done");
+}
+
+// One set of moves for a comparison, every event tagged: pitch steps (8 and 2 degrees of controller pitch at 0.04), yaw
+// steps (8 and 0.4 degrees), five back-and-forth cycles of the yaw at 1200 counts/s, circles.
+static void cmp_moves(const char *tag) {
+    static const struct { int axis, n; } st[] = {{1, -200}, {1, 200}, {1, -200}, {1, 200}, {1, -50}, {1, 50},
+                                                 {0, 200}, {0, -200}, {0, 10}, {0, -10}, {0, 10}, {0, -10}};
+    for (size_t i = 0; i < sizeof st / sizeof *st; i++) {
+        ev("step axis=%c n=%d%s", st[i].axis ? 'y' : 'x', st[i].n, tag);
+        move(st[i].axis ? 0 : st[i].n, st[i].axis ? st[i].n : 0, 0, 1000);
+        settle();
+        ev("end");
+    }
+    ev("reverse n=240 v=1200 cycles=5%s", tag);
+    for (int k = 0; k < 10; k++) move(k & 1 ? -240 : 240, 0, 1200, 1000);
+    settle();
+    ev("end");
+    circle_run(250, 1, 3, tag);
+    circle_run(250, 0.5, 4, tag);
+    circle_run(60, 0.5, 4, tag);
+}
+
+// The same moves without and with the pokes (TOTK_MGYRO_BENCH_POKE).
+static void t_pokecmp(void) {
+    if (!npk) { ev("pokecmp: no TOTK_MGYRO_BENCH_POKE"); return; }
+    cmp_moves(" poke=0");
+    poke_apply(1);
+    cmp_moves(" poke=1");
+    poke_apply(0);
+}
+
+// The same moves with native mouse aiming off (the game's gyro smoothing, mouse_native.c) and on, the setting
+// switched while the game runs; the setting's own value is put back after.
+static void t_native(void) {
+    char was[16];
+    snprintf(was, sizeof was, "%s", cfg_value("TOTK_MOUSE_NATIVE"));
+    cfg_set("TOTK_MOUSE_NATIVE", "0");
+    wait_reads(10);
+    cmp_moves(" native=0");
+    cfg_set("TOTK_MOUSE_NATIVE", "1");
+    wait_reads(10);
+    cmp_moves(" native=1");
+    cfg_set("TOTK_MOUSE_NATIVE", was);
+    wait_reads(10);
+}
+
+static void wait_until(int64_t r) {
+    if (nreads() < r) wait_reads(r - nreads());
+}
+
+// The view aimed at deg degrees above level from a level camera (counts at the yaw's gain).
+static void aim_from_level(double deg) {
+    level_camera();
+    if (deg) move(0, -view_counts(deg), 2500, 1000);
+    wait_reads(20);
+}
+
+// Leaving squid form. From a level camera aimed start degrees up: ZL held 100 frames (squid form), sq degrees of
+// counts up in squid form once the camera settled, then the release; from the release, the mouse still (during 0),
+// up (1) or down (-1) by dur_counts over half a second, or round a small circle (2: 60 counts in 0.5 s), as a player
+// aiming while the form changes. Events: "surface ... phase=dive|squid|release|after". mode: how the case runs
+// (surface_mode: new, old or the game's own aiming).
+static const char *const surface_modes[] = {"game", "old", "new"};
+
+// 2 native aiming as built, 1 with mgb_native_ref and mgb_native_hold off (release 0.3.4's), 0 the game's own aiming
+// (mouse_native = 0; the virtual controller started over before each case, as nothing follows the view then).
+static void surface_mode(int mode) {
+    cfg_set("TOTK_MOUSE_NATIVE", mode ? "1" : "0");
+    __atomic_store_n(&ref_set, mode == 1 ? 0 : -1, __ATOMIC_RELAXED);
+    __atomic_store_n(&hold_resync_set, mode == 1 ? 0 : -1, __ATOMIC_RELAXED);
+    wait_reads(10);
+}
+
+static void surface_case(int mode, double start, double sq, int during, int dur_counts, int swim) {
+    if (!mode) input_motion_restart(), wait_reads(5);
+    aim_from_level(start);
+    const char *dn = during == 0 ? "still" : during == 1 ? "up" : during == -1 ? "down" : "circle";
+    char tag[160];
+    snprintf(tag, sizeof tag, "mode=%s start=%g sq=%g during=%s n=%d swim=%d", surface_modes[mode], start, sq, dn,
+             dur_counts, swim);
+    int64_t r0 = nreads();
+    ev("surface %s phase=dive", tag);
+    input_inject("ZL 100");
+    if (swim) input_inject("LSTICK 0 32767 100");
+    wait_reads(45);   // the change into squid form takes 22 to 40 frames
+    ev("surface %s phase=squid", tag);
+    if (sq) move(0, -view_counts(sq), 2500, 1000);
+    wait_until(r0 + 98);
+    ev("surface %s phase=release", tag);
+    if (during == 1 || during == -1) move_start(0, -during * dur_counts, dur_counts / 0.5, 1000, 0);
+    else if (during == 2) circle_start(60, 0.5, 1, 1000, 1);
+    move_wait();
+    wait_until(r0 + 100 + 60);
+    ev("surface %s phase=after", tag);
+}
+
+// Ink the floor around the player: the view 60 degrees down, ZR held while it turns round once in 3 s.
+static void ink_floor(void) {
+    level_camera();
+    int down = view_counts(60), turn = view_counts(360);
+    move(0, down, 2500, 1000);
+    input_inject("ZR 200");
+    move(turn, 0, turn / 3.0, 1000);
+    wait_reads(40);
+    move(0, -down, 2500, 1000);
+}
+
+// modes: the surface_mode values to run, in order (2 as built, 1 0.3.4's, 0 the game's own aiming).
+static void t_surface(const char *ms) {
+    char was[16];
+    snprintf(was, sizeof was, "%s", cfg_value("TOTK_MOUSE_NATIVE"));
+    static const double start[] = {0, 20}, sq[] = {-6, 3, 6, 12, 25};
+    static const struct { double start; int during, n; } dur[] = {
+        {0, 1, 60}, {0, -1, 60}, {0, 1, 150}, {0, 2, 0}, {20, 1, 60}, {20, -1, 60}, {20, 1, 150}, {20, 2, 0},
+        {-20, 1, 60}, {-20, 2, 0}, {40, 1, 60}, {40, 0, 0}};
+    for (const char *m = ms; *m; m++) {
+        int mode = *m - '0';
+        if (mode < 0 || mode > 2) continue;
+        surface_mode(mode);
+        for (size_t i = 0; i < sizeof start / sizeof *start; i++) {
+            surface_case(mode, start[i], 0, 0, 0, 0);
+            for (size_t j = 0; j < sizeof sq / sizeof *sq; j++) surface_case(mode, start[i], sq[j], 0, 0, 0);
+        }
+        for (size_t i = 0; i < sizeof dur / sizeof *dur; i++)
+            surface_case(mode, dur[i].start, 0, dur[i].during, dur[i].n, 0);
+        surface_case(mode, 0, 6, 1, 60, 0);
+    }
+    __atomic_store_n(&ref_set, -1, __ATOMIC_RELAXED);
+    __atomic_store_n(&hold_resync_set, -1, __ATOMIC_RELAXED);
+    cfg_set("TOTK_MOUSE_NATIVE", was);
+    wait_reads(10);
+}
+
+// Leaving squid form after a swim in ink, still moving forward: the floor inked first, then from start degrees up a
+// swim of 100 frames with the left stick forward, released while it moves.
+static void t_swim(void) {
+    static const struct { double start, sq; int during, n; } c[] = {
+        {0, 0, 0, 0}, {0, 0, 1, 60}, {0, 6, 0, 0}, {20, 0, 0, 0}, {20, 0, 1, 60}, {20, -6, 0, 0}};
+    for (int mode = 2; mode >= 1; mode--) {
+        surface_mode(mode);
+        for (size_t i = 0; i < sizeof c / sizeof *c; i++) {
+            if (i % 3 == 0) ink_floor();
+            surface_case(mode, c[i].start, c[i].sq, c[i].during, c[i].n, 1);
+        }
+    }
+    __atomic_store_n(&ref_set, -1, __ATOMIC_RELAXED);
+    __atomic_store_n(&hold_resync_set, -1, __ATOMIC_RELAXED);
+}
+
+// Situations a player meets, each from a level camera aimed `at` degrees up, with the mouse still (mode 0), round a
+// small circle (1: 60 counts, 0.5 s a turn, both axes) or up and down (2: 120 counts each way, 1 s a cycle) for 2.5 s,
+// the action 10 reads after the motion starts. Events "situ <name> mode=<m> at=<deg>" and "end".
+static void situ_motion(int mode, double secs) {
+    if (mode == 1) circle_start(60, 0.5, secs / 0.5, 1000, 1);
+    else if (mode == 2) circle_start(120, 1.0, secs / 1.0, 1000, 0);
+}
+
+static void situ(const char *name, int mode, double at) {
+    aim_from_level(at);
+    ev("situ %s mode=%d at=%g", name, mode, at);
+    situ_motion(mode, 2.5);
+    wait_reads(10);
+    if (!strcmp(name, "jump")) input_inject("B 8");
+    else if (!strcmp(name, "squidjump")) input_inject("ZL 50"), wait_reads(25), input_inject("B 8");
+    else if (!strcmp(name, "shotsurface")) input_inject("ZL 60"), wait_reads(60), input_inject("ZR 20");
+    else if (!strcmp(name, "sub")) input_inject("R 8");
+    else if (!strcmp(name, "special")) input_inject("RCLICK 8");
+    else if (!strcmp(name, "shoot")) input_inject("ZR 60");
+    else if (!strcmp(name, "recentre")) input_inject("Y 6");
+    else if (!strcmp(name, "menu")) menu_toggle(), wait_reads(60), menu_toggle();
+    else if (!strcmp(name, "map")) input_inject("X 6"), wait_reads(70), input_inject("X 6");
+    else if (!strcmp(name, "focus")) gfx_window_focus_changed(0), wait_reads(60), gfx_window_focus_changed(1);
+    else if (!strcmp(name, "hitch"))
+        for (int i = 1; i <= 3; i++) {
+            __atomic_store_n(&stall_ns, (int64_t)i * 100000000, __ATOMIC_RELAXED);
+            wait_reads(30);
+        }
+    else if (!strcmp(name, "yflick")) move(0, -1000, 0, 1000), wait_reads(3), move(0, 1000, 0, 1000);
+    else if (!strcmp(name, "xflick")) move(3000, 0, 0, 1000), wait_reads(3), move(-3000, 0, 0, 1000);
+    move_wait();
+    wait_reads(90);   // a change of form back takes up to 40 frames after the action
+    ev("end");
+}
+
+// The game's recentre (Y) with the view down or up, then, after the virtual controller has followed the view for 2 s,
+// a vertical flick past 30 degrees of controller pitch in one frame and back (each a frame the linear pitch takes the
+// curve's result as the game computed it), with the mouse still and moving.
+static void situ_y_flick(double at, int mode) {
+    aim_from_level(at);
+    ev("situ yflickafter mode=%d at=%g", mode, at);
+    input_inject("Y 6");
+    wait_reads(120);
+    situ_motion(mode, 2);
+    wait_reads(10);
+    move(0, -1000, 0, 1000);
+    wait_reads(3);
+    move(0, 1000, 0, 1000);
+    move_wait();
+    wait_reads(40);
+    ev("end");
+}
+
+static void t_situ(int part) {
+    static const char *names[] = {"jump", "squidjump", "shotsurface", "sub", "shoot", "special", "recentre", "menu",
+                                  "map", "focus", "hitch", "yflick", "xflick"};
+    typedef struct { int mode; double at; } Place;
+    static const Place p1[] = {{0, 15}, {1, 15}, {2, 15}}, p2[] = {{1, -15}, {1, 35}, {2, -30}};
+    const Place *p = part == 1 ? p1 : p2;
+    for (size_t k = 0; k < 3; k++)
+        for (size_t i = 0; i < sizeof names / sizeof *names; i++) situ(names[i], p[k].mode, p[k].at);
+    for (int mode = 0; mode < 2; mode++) situ_y_flick(part == 1 ? -30 : 30, mode);
+    if (part == 1) {
+        aim_from_level(15);
+        ev("situ idle mode=0 at=15");
+        wait_reads(60 * 20);
+        ev("end");
+    }
+}
+
+// Large vertical turns in one frame, from a camera aimed `at` degrees up, toward level first: a flick of 1000 counts
+// and back (31.8 degrees of controller pitch at 0.0318 degrees per count, 40 at 0.04), without a Y (neither leg reaches
+// a limit) and after a Y with the view there; and a swipe of 1050 counts at 10000 counts/s made while the game is held
+// in a 200 ms hitch, so the read after it carries them all, and back without a hitch. With mgb_native_hold off
+// (release 0.3.4) then as built. Events "flick hold=<0|1> at=<deg> kind=flick|yflick|hitch", "back" and "end".
+static void t_flick(void) {
+    static const double at[] = {-30, 30, 20};
+    static const char *const kinds[] = {"flick", "yflick", "hitch"};
+    for (int hold = 0; hold < 2; hold++) {
+        __atomic_store_n(&hold_resync_set, hold ? -1 : 0, __ATOMIC_RELAXED);
+        for (size_t i = 0; i < sizeof at / sizeof *at; i++)
+            for (int k = 0; k < 3; k++) {
+                int d = at[i] < 0 ? -1 : 1;   // counts y > 0 turn down
+                aim_from_level(at[i]);
+                ev("flick hold=%d at=%g kind=%s", hold, at[i], kinds[k]);
+                if (k == 1) input_inject("Y 6"), wait_reads(120);
+                if (k < 2) {
+                    move(0, 1000 * d, 0, 1000);
+                } else {
+                    int64_t r0 = nreads();
+                    __atomic_store_n(&stall_ns, (int64_t)200000000, __ATOMIC_RELAXED);
+                    while (nreads() == r0) plat_sleep_ns(200000);   // that read has begun its stall
+                    move(0, 1050 * d, 10000, 1000);
+                }
+                wait_reads(20);
+                ev("back");
+                move(0, -(k < 2 ? 1000 : 1050) * d, k < 2 ? 0 : 10000, 1000);
+                wait_reads(40);
+                ev("end");
+            }
+    }
+    __atomic_store_n(&hold_resync_set, -1, __ATOMIC_RELAXED);
+}
+
+// Circles of 250 counts, 1 s a turn, three turns, from a level camera, standing and walking forward (the left stick
+// held), twice each. Events "walk stick=<0|1>" and "end".
+static void t_walk(void) {
+    for (int k = 0; k < 4; k++) {
+        int stick = k & 1;
+        level_camera();
+        ev("walk stick=%d", stick);
+        if (stick) input_inject("LSTICK 0 32767 200");
+        wait_reads(10);
+        circle_start(250, 1, 3, 1000, 1);
+        move_wait();
+        wait_reads(60);
+        ev("end");
+    }
+}
+
+// A match: the mouse moves for 330 s, round circles of two sizes, up and down, still, flicks and a slow drift, while
+// the game goes through what it shows (the intro, the battle, the end); no finder. The view is read from the N line.
+// old: with mgb_native_ref and mgb_native_hold off (release 0.3.4).
+static void t_match(int old) {
+    const double secs = 330;
+    __atomic_store_n(&ref_set, old ? 0 : -1, __ATOMIC_RELAXED);
+    __atomic_store_n(&hold_resync_set, old ? 0 : -1, __ATOMIC_RELAXED);
+    ev("match old=%d", old);
+    uint64_t t0 = kern_now_ns();
+    int k = 0;
+    while ((kern_now_ns() - t0) * 1e-9 < secs) {
+        switch (k++ % 6) {
+        case 0: ev("match circle r=60"); circle_start(60, 0.5, 6, 1000, 1); break;
+        case 1: ev("match circle r=250"); circle_start(250, 1, 3, 1000, 1); break;
+        case 2: ev("match vsine r=200"); circle_start(200, 1, 3, 1000, 0); break;
+        case 3: ev("match still"); break;
+        case 4: ev("match flick"); move(400, -200, 0, 1000), wait_reads(5), move(-400, 200, 0, 1000); break;
+        case 5: ev("match drift up"); move(0, -150, 100, 1000), move(0, 150, 100, 1000); break;
+        }
+        move_wait();
+        wait_reads(60);
+    }
+    ev("match done");
+}
+
+// The objects of TOTK_MGYRO_BENCH_OBJ: the function-entry hook for 30 reads, then off.
+static void watch_find(void) {
+    if (!nwfn) return;
+    fnprof_on(FNPROF_BENCH);
+    wait_reads(30);
+    fnprof_off(FNPROF_BENCH);
+    uint64_t heap = mem_layout()->heap.base;
+    for (int k = 0; k < nwfn; k++)
+        for (int i = 0; i < WSEEN && wseen[k][i]; i++)
+            out("H,obj%d,fn=main+%#llx,%s%#llx%s", k, (unsigned long long)(wfn[k] - main_base()),
+                wseen[k][i] >= heap ? "heap+" : "", (unsigned long long)(wseen[k][i] - (wseen[k][i] >= heap ? heap : 0)),
+                i ? " (not watched)" : "");
+    out_flush();
 }
 
 static int wants(const char *list, const char *name) {
@@ -782,6 +1485,8 @@ static void bench_main(void *arg) {
     if (!ofile) rt_log("mgyro bench: cannot write %s", path);
     double delay = d && *d ? atof(d) : 40;
     rt_log("mgyro bench: tests '%s', starting %.0f s after the first live six-axis read, CSV %s", list, delay, path);
+    watch_parse();
+    poke_parse();
     // the first read with samples, then the delay
     while (!last_s0) plat_sleep_ns(10000000);
     uint64_t t0 = kern_now_ns();
@@ -797,16 +1502,21 @@ static void bench_main(void *arg) {
     out("H,mouse_gyro_y,%s", cfg_value("TOTK_MOUSE_GYRO_Y"));
     out("H,mouse_gyro_pitch,%s", cfg_value("TOTK_MOUSE_GYRO_PITCH"));
     out("H,heap,%#llx+%#llx", (unsigned long long)mem_layout()->heap.base, (unsigned long long)mem_heap_size());
-    // Y: the game recentres its camera behind the player, level (and the virtual controller levels with it)
-    shots_setup();
-    __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
-    wait_reads(5);
-    ev("start Y");
-    input_inject("Y 6");
-    wait_reads(60);
-    __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
-    wait_reads(5);
     int found = 0;
+    if (!strcmp(list, "match") || !strcmp(list, "matchold")) {   // a match: no Y (menus may be open), no finder (the
+        t_match(list[5] != 0);                                      // view is the N line's), the motion only
+        found = -1;
+    } else {
+        // Y: the game recentres its camera behind the player, level (and the virtual controller levels with it)
+        shots_setup();
+        __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
+        wait_reads(5);
+        ev("start Y");
+        input_inject("Y 6");
+        wait_reads(60);
+        __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
+        wait_reads(5);
+    }
     for (int tries = 0; tries < 6 && !found; tries++) {
         found = find_aims();
         if (!found) {
@@ -815,6 +1525,7 @@ static void bench_main(void *arg) {
         }
     }
     if (!found) rt_log("mgyro bench: no aim vector: the tests log the controller only");
+    watch_find();
     if (wants(list, "look")) t_look();
     if (wants(list, "idle")) t_idle(10);
     if (wants(list, "lin")) t_lin(0), t_lin(1);
@@ -832,6 +1543,23 @@ static void bench_main(void *arg) {
     if (wants(list, "hitch")) t_hitch();
     if (wants(list, "fps")) t_fps();
     if (wants(list, "image")) t_image();
+    if (wants(list, "circle")) t_circle();
+    if (wants(list, "vsine")) t_vsine();
+    if (wants(list, "squid")) t_squid();
+    if (wants(list, "drift")) t_drift();
+    if (wants(list, "ink")) t_ink();
+    if (wants(list, "wall")) t_wall();
+    if (wants(list, "pokecmp")) t_pokecmp();
+    if (wants(list, "native")) t_native();
+    if (wants(list, "sweep")) t_sweep();
+    if (wants(list, "surface")) t_surface("21");
+    if (wants(list, "surfacenew")) t_surface("2");
+    if (wants(list, "surfacegame")) t_surface("0");
+    if (wants(list, "swim")) t_swim();
+    if (wants(list, "situ1")) t_situ(1);
+    if (wants(list, "situ2")) t_situ(2);
+    if (wants(list, "flick")) t_flick();
+    if (wants(list, "walk")) t_walk();
     if (wants(list, "idle")) t_idle(10);
     ev("done");
     wait_reads(10);

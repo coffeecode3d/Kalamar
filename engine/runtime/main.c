@@ -3,7 +3,8 @@
 //   totk.exe [--exefs DIR] [--romfs DIR] [--profile DIR] <mode>
 //     --selftest        layout, dispatch table and host-function registry; needs no game files
 //     --probe-mgyro     the mouse as the six-axis sensor and Splatoon 3's default keys; no game files
-//     --probe-profile   save_profile: dropped gear, missing appearance, gear_abilities, backup pruning; no game files
+//     --probe-profile   save_profile: dropped gear, missing appearance, gear_abilities, main_abilities, backup pruning;
+//                       no game files
 //     --probe-mods      the mods folder scan, order and switches (mods.c), the size table entries of the members of
 //                       mods' packs (restbl_probe.c); needs no game files
 //     --probe-loader    load and relocate the modules, check them against the measured 1.2.1 values
@@ -40,6 +41,7 @@
 #include "layout.h"
 #include "platform/platform.h"
 #include "auto_match.h"
+#include "mgyro_bench.h"
 #include "save_profile.h"
 #include "scene_start.h"
 #include "sha256.h"
@@ -178,6 +180,7 @@ void fnprof_hit(uint64_t addr, uint64_t lr, uint64_t x0) {
     if (on & FNPROF_RES) res_fn_hit(addr, x0);
     if (on & (FNPROF_SCENE | FNPROF_TRACE)) scene_fn_hit(addr, lr, x0);
     if (on & FNPROF_AUTO) automatch_fn_hit(addr);
+    if (on & FNPROF_BENCH) mgb_fn_hit(addr, x0);
 }
 
 void rt_brk(Cpu *c, uint32_t imm, uint64_t pc) {

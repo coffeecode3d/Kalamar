@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clearPart, fillAll, isEdited, pickable, setSlot, slotsOf, withSlots } from "./subSlots.ts";
+import { chosenMain, clearPart, fillAll, isEdited, mainChoices, mainOf, pickable, setMain, setSlot, slotsOf, withSlots } from "./subSlots.ts";
 
 const base = { schema: 1, name: "K", head: 1, clothes: 2, shoes: 3 };
 
@@ -39,4 +39,31 @@ test("the picker lists each ability once, by name", () => {
 
 test("a stored list is cut to three slots", () => {
   assert.deepEqual(slotsOf(withSlots(base, "shoes", ["A", "B", "C", "D"]), "shoes"), ["A", "B", "C"]);
+});
+
+test("the main slot shows the piece's own until a main ability is chosen", () => {
+  assert.equal(chosenMain(base, "head"), null);
+  assert.equal(mainOf(base, "head", "Own"), "Own");
+  assert.equal(mainOf({ ...base, main_abilities: { head: null, clothes: null, shoes: null } }, "head", "Own"), "Own");
+  const m = setMain(base, "head", "Alpha");
+  assert.equal(mainOf(m, "head", "Own"), "Alpha");
+  assert.equal(chosenMain(m, "clothes"), null, "the other parts stay unchosen");
+  assert.equal(base.main_abilities, undefined, "the profile is never changed in place");
+});
+
+test("choosing the piece's own main ability is an explicit choice", () => {
+  // null would leave the save as an earlier launch left it; the own ability written back undoes that launch's choice
+  const back = setMain(setMain(base, "shoes", "Alpha"), "shoes", "Own");
+  assert.equal(chosenMain(back, "shoes"), "Own");
+  assert.equal(chosenMain(setMain(back, "shoes", null), "shoes"), null);
+});
+
+test("a part offers the main abilities its own pieces have, in the enum's order", () => {
+  const pieces = [
+    { ability: "HeadOnly", selectable: true }, { ability: "Beta", selectable: true }, { ability: "Alpha", selectable: true },
+    { ability: "Hidden", selectable: false }, { ability: null, selectable: true }, { ability: "Beta", selectable: true },
+  ];
+  assert.deepEqual(mainChoices(["Alpha", "Beta", "Gamma", "HeadOnly", "ShoesOnly", "Hidden"], pieces), ["Alpha", "Beta", "HeadOnly"]);
+  assert.deepEqual(mainChoices([], pieces), [], "no list from the game: nothing to offer");
+  assert.deepEqual(mainChoices(["Alpha"], []), [], "no game data: nothing to offer");
 });

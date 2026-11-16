@@ -24,6 +24,7 @@ mod cli;
 mod shell;
 mod winutil;
 mod online;
+pub mod loadouts;
 pub mod profile;
 pub mod proto;
 mod relay;
@@ -185,6 +186,10 @@ pub fn run() {
             commands::gamedata_cache_clear,
             commands::profile_load,
             commands::profile_save,
+            commands::loadouts_list,
+            commands::loadouts_save,
+            commands::loadouts_rename,
+            commands::loadouts_delete,
             commands::gear_abilities_info,
             commands::server_card_preview,
             commands::server_card_import,

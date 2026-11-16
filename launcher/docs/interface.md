@@ -31,11 +31,14 @@ The rail holds Play, Locker, Community (only once a server is added) and Setting
 ### Locker
 
 Tabs for the character, gear, weapon and splashtag, a side card with the name and the "At launch" options. Under the
-chosen piece of the Gear tab, three slot buttons show its sub-abilities (icon and name, or "Empty"); a slot opens a
-picker with every ability a sub slot can hold, "Empty" and the "Fill all three with this ability" shortcut, and "Clear"
-empties the three. The editor and the "Full stock of ability chunks" option appear only when the installed game applies
-them, else one line asks for the game update ([game-data.md](game-data.md), "Sub-abilities and ability chunks").
-`npm run dev:mock` shows it (`?gear=old`: the update line, `?gear=none`: nothing).
+chosen piece of the Gear tab, a main slot and three sub slot buttons show its abilities (icon and name, or "Empty"). The
+main slot shows the piece's own main ability until another is chosen; it opens a picker with the main abilities the
+game's pieces of that part have, the piece's own marked, and "Piece's own main ability" gives it back. A sub slot opens
+a picker with every ability a sub slot can hold, "Empty" and the "Fill all three with this ability" shortcut, and
+"Clear" empties the three. Each kind of slot, and the "Full stock of ability chunks" option, appears only when the
+installed game applies it, else one line asks for the game update ([game-data.md](game-data.md), "Sub-abilities and
+ability chunks" and "Main abilities"). `npm run dev:mock` shows it (`?gear=old`: the update line, `?gear=sub`: sub
+slots and the update line for the main slot, `?gear=none`: nothing).
 
 ### Play
 

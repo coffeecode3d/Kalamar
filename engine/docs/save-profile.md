@@ -24,6 +24,7 @@ into the save, then the game boots straight to the plaza with that character. `r
   "emote": 7,
   "unlock_all": false,
   "gear_abilities": {"head": ["<ability>", "<ability>", null], "clothes": [3, 3, 3]},
+  "main_abilities": {"head": "<ability>", "shoes": 5},
   "chunks": "max"
 }
 ```
@@ -43,6 +44,7 @@ into the save, then the game boots straight to the plaza with that character. `r
 | `emote` | `EmoteInfo` ids | `Coordinates/WinEmote` |
 | `unlock_all` | `true` owns every weapon, gear, banner, title word and emote of those tables | the ownership maps below |
 | `gear_abilities` (prototype) | `head`, `clothes`, `shoes`: three sub abilities each, as a name of main's ability enum, the enum's value, or `null` (also `"None"`, -1) for an empty slot; only the abilities a sub slot can hold (the enum's values below 100) | `ExSkillArray` and `Rarity` of the equipped piece's ownership record ([Sub abilities](#sub-abilities)) |
+| `main_abilities` (prototype) | `head`, `clothes`, `shoes`: one main ability each, as a name of main's ability enum or the enum's value; `null` or absent leaves the piece's own as the save has it; only an ability that a player piece of that part has as its main ability in the game's gear table, never the empty value | `MainSkill` of the equipped piece's ownership record ([Main abilities](#main-abilities)) |
 | `chunks` (prototype) | `"max"` (999) or a count 0 to 999 | `HaveSkillChipMap[ability]` = the count, for every ability a sub slot can hold |
 
 Every id is checked against the game's own RomFS tables (`RSDB/*.rstbl.byml.zs`); a profile with a bad value leaves the
@@ -92,7 +94,37 @@ only to the parts it names. A profile whose `gear_abilities` or `chunks` is malf
 a main-only ability in a sub slot is refused whole, as for the other fields. In a match the game sends each player's
 gear abilities to the others: the result file lists them ([auto-match.md](auto-match.md), "The result"). With the
 room's `main_abilities_only=1` the record of both players' games held every sub slot empty while the saves kept
-theirs. That an ability in the record changes the play (speed, ink use) was not measured.
+theirs; the main ability stays, an edited one included ([Main abilities](#main-abilities)). That an ability in the
+record changes the play (speed, ink use) was not measured.
+
+## Main abilities
+
+Prototype. A piece's main ability is the `MainSkill` of its ownership record, an ability enum value; a newly owned
+piece gets the gear table's (`GearInfo{Head,Clothes,Shoes}` `Skill`). Measured on Splatoon 3 11.3.0 the way the sub
+abilities were: values written into test saves, the game run on them (an automatic 1v1 through the local test relay,
+which plays on a copy of each save), the copy decoded at each of the game's own commits and the result files read.
+
+| `MainSkill` written | The save at the game's next commit | An automatic match |
+| --- | --- | --- |
+| an ability a sub slot can hold, on a piece whose table gives a main-only one (head 1004) | kept | starts and ends; both players' result files list it as that piece's main ability |
+| a main-only ability of the same part, not the piece's own (clothes 5000 on one player, head 1018 on the other) | kept | starts and ends; listed in both result files |
+| a main-only ability that the gear table gives to another part only (shoes 6002 given a head one) | kept | does not start: when the host confirms the teams, both games leave the room and go back to the lobby (`player-left`, `host-left`); no crash. A first run that also gave a clothes piece a shoes one ended the same way |
+| the empty value -1 (a piece not worn) | kept | not tried |
+| the piece's own (shoes 6003) | unchanged | starts and ends |
+| an ability a sub slot can hold (head 1004), in a room with `main_abilities_only=1` | kept | starts and ends; both result files list it while every sub slot reads empty |
+
+So the game reads `MainSkill` as written, without the reset it applies to a main-only ability in a sub slot
+([Sub abilities](#sub-abilities)), but a match where a worn piece has another part's main-only ability does not start.
+`main_abilities` therefore takes, per part, the abilities that a player piece of that part (a gear table row that is
+not `HowToGet: Impossible`) has as its main ability, read from the player's tables at run time: every ability a sub
+slot can hold, plus the main-only ones of that part. Another part's main-only ability, an unknown name or value, and
+the empty value (`"None"`, -1) refuse the whole profile with the reason logged, as for the other fields.
+
+`main_abilities` applies to the pieces equipped once the profile's `gear` is in (the profile's, else the save's), and
+only to the parts it names; a match loadout (`KLM_MATCH_LOADOUT`) takes it too. In a match the game sends each worn
+piece's main ability to the other players: the result file's `abilities` lists it first
+([auto-match.md](auto-match.md), "The result"). The room's "main abilities only" setting turns the sub abilities off,
+not a chosen main ability. That a main ability in the record changes the play was not measured.
 
 ## When it is applied
 

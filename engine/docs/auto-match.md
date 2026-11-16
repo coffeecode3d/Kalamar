@@ -38,6 +38,7 @@ window opens with the error `bad-settings` (status and result files written, exi
 | `KLM_MATCH_SHOTS` | a folder: a screenshot at each step, `auto-<host\|join>-<nn>-<step>.png`, and of the first frame shown, `reveal-<host\|join>-<match id>.png` |
 | `KLM_MATCH_PLAY` | test aid: seconds the player walks forward with ZR held once in the stage (default 0: stands still) |
 | `KLM_MATCH_DIAG` | test aid: `1` logs every RomFS file the game opens in the 30 s after the stage pack |
+| `KLM_MATCH_BENCH` | test aid, host: `teams` closes the game (status `finished`, exit code 0) once the teams are set and checked in the room, without starting the match: a lobby run up to the team screen, for repeated runs ([Slow machines](#slow-machines)) |
 
 The players' names are their nicknames (`KLM_NICKNAME`, else the profile's name). In relay mode set
 `KLM_LAN_NAME` to the nickname too: it is the name the relay gives the other members (teams by name).
@@ -119,7 +120,7 @@ sees half a file). One JSON object on one line:
 | `loadout-failed` | boot | `KLM_MATCH_LOADOUT` is not a JSON object or is refused (an id the game's tables do not have; `reason` names it) |
 | `stage-unavailable` | create | host: the stage asked for is not in this player's room list (`stages`) |
 | `rules-not-applied` | start | host: the room's own state did not show the mode, stage and other settings asked for within 10 s |
-| `teams-not-set` | start | host: after the team screen a player's team in the room is not the one asked for |
+| `teams-not-set` | start | host: after the team screen a player's team in the room is not the one asked for, or a step of the room screen did not happen ("ready" not taken, the team screen not opened, "Teams OK" not taken; `reason` names the room screen's state) |
 | `room-timeout` | list | host, between rounds: the room screen did not come back |
 | `boot-timeout` | boot | the game did not reach its local lobby in time |
 | `network-unavailable` | boot | the game's LAN network did not start; relay mode: the relay did not take the player into the room (unreachable, or refused without one of the reasons below) |
@@ -277,8 +278,8 @@ four members in a session; [What was verified](#what-was-verified)):
   member, for any n; the arrival-order form `teams=AB-B...` is the only one in lan mode. At most 4 per team (checked at
   start and at each `next`: `bad-settings`, a `next` refused); teams of different sizes and `-` rows are allowed.
 - Setting the rows: written into the save's 10 places before the team screen opens (no press per row); the team screen
-  shows one row per member, spectators included, so `Down` x n reaches "Teams OK"; every asked row's team is then
-  checked in the room.
+  shows one row per member, spectators included, so `Down` x n reaches "Teams OK" (the flow presses n + 1: the cursor
+  stops on "Teams OK", so a lost press costs nothing); every asked row's team is then checked in the room.
 - Start: every guest presses A at the pre-match screen every 3 s until the stage loads; a guest that never confirms
   holds the others until `start=` (`start-timeout`).
 
@@ -353,8 +354,9 @@ whose effect does not follow:
 | host: players in | none | session traffic on 49152 from as many other addresses as `players` - 1 |
 | host: mode, stage, other settings | none: written at the room screen's commit ([Room settings](#room-settings)) | the room's net states hold them (10 s at most) |
 | host: teams | none: each row's team written into the save at the room screen's commit, before the team screen opens on them | read back from the save |
-| host: ready | `Down`, `Down`, `A`, again 3 s later while the room screen's state (`+0x14`) does not change (a screen back after a match ignores presses during its entry) | the state changes: the team screen |
-| host: teams OK | `Down` once per row, `A`, again while the state does not change | the state changes; every asked row has its team in the room (3 s) |
+| host: ready | once the room screen has shown its state (`+0x14`) for 60 frames: `Down`, `Down`, `A`, again after 180 frames while the state does not change (a screen back after a match ignores presses during its entry) | the state changes: the game's check of the player list |
+| host: team screen | none | the room screen's state is the team screen's (7) and has been for 30 frames ([Slow machines](#slow-machines)) |
+| host: teams OK | `Down` once per row and once more, `A`, again after 180 frames while the team screen stays | the team screen is left; every asked row has its team in the room |
 | guest: a session | `X` (search again) until one answers | a datagram on 35000 from another address starting with byte 1 (an answer; a search starts with 0), then the search's end |
 | guest: join | `A`, `A` | the library's network restarts |
 | pre-match | `A` every 2.5 s (host) / 3 s (guest) | the stage's scene pack opens (all of them open once at boot; this is the second time) |
@@ -376,6 +378,52 @@ be released (`lan_net.c`), or the join would fall back to the plaza.
 What a direct path (calling the game instead of pressing) would still need: the lobby menu's handlers that post the
 create and join requests and keep the menu in step with the session (the delegates' sources) and the pre-match
 "start". The room's settings and teams are no longer pressed blind: below.
+
+### Slow machines
+
+The game's menus count frames, not seconds, so a press timed in seconds lands earlier in the game's own steps on a
+machine that shows fewer frames a second. The host's room screen is a state machine (`+0x14` its state, `+0x18` the
+frames spent in it, zeroed at each change; the room screen's update in `UI_STATE`'s comment, `auto_match.c`). Its
+states on the way to the match, measured on 11.3.0: 4 the room (mode, stage, "ready"), 5 the game's check of the player
+list that "ready" starts (a message), 7 the team screen, 8 once "Teams OK" is taken (the room's team array, `+0xdc0` of
+the room, is set in that frame). The check lasts 115 to 125 of the screen's frames: 2.1 s at 60 frames a second, 3 to
+4.5 s at 26 to 39. The team screen takes presses from its first frames (a `Down` 20 ms after it opened was taken).
+
+The flow used to press on the team screen 3 s after the check began. A host below about 40 frames a second in those
+seconds, or with long frames in them, was still in the check then: its `Down` presses met the message, the change from
+the check to the team screen was taken for "Teams OK" (the state changed), the `A` landed on a row of the team screen
+just opened, and 3 s later the room's team array still held -1 for every row while the save's places held the teams
+asked for: `teams-not-set` (seen on a player's host at 37 frames a second, and on a loaded machine with presents 19 ms
+apart and frames of 375 and 757 ms in those seconds). The failed run's screenshot shows the team screen up, its rows
+set, the cursor on the second row and "Teams OK" not taken. Late input and input first take no part: the presses reach
+the game in the same frames with them off, and the check outlasts the 3 s the same way.
+
+Every step of the room screen now waits for the screen's own state, and its presses are spaced in the game's frames
+(`press_paced`: each press held 6 frames, the next one 48 frames later on the room, 30 on the team screen):
+
+- "ready": once the room screen has shown its state for 60 frames; again after 180 frames without a change;
+- the team screen: the flow waits for its state and 30 frames in it, however long the check lasts;
+- "Teams OK": `Down` once per row and once more (the cursor stops on "Teams OK", the last item), `A`; again after 180
+  frames on the team screen; then every asked row is checked in the room's team array.
+
+Each wait has a bound in frames and one of 60 s of wall time, and a step that does not happen stops the flow with
+`teams-not-set` and the room screen's state in `reason`. The log has a line at each change of the room screen's state,
+with the frames the state before lasted (`automatch: +64.43 s room screen state 5 -> 7 after 125 frames`). At 60 frames
+a second the steps take as long as before (from "ready" to the teams in the room: 4.9 s, against 4.8 s).
+
+Reproduction: the host's process held to one CPU (its affinity set to the first logical processor once it started)
+runs the lobby at 35 to 44 frames a second, as the player's machine did; `KLM_MATCH_BENCH=teams` ends each run once the
+teams are set (about 80 s from start). Measured with the host held to one CPU, relay mode, teams by name: the code
+before the fix stopped with `teams-not-set` in TB_FAIL of 10 runs, and in TL_FAIL of 5 with late input and input first
+off; the fix set the teams in TX_OK of 20 runs.
+
+Still timed in seconds, each followed by a check of its effect and retried until its step's time
+(`KLM_MATCH_TIMEOUTS`) is up, so a slow machine only takes longer: the session list (`L`, `A` 1.5 s later; the lobby
+first shows welcome messages that the `A`s move on: the list opened at the fourth try in the runs above, slow host or
+not, 40 to 50 s after the start), creating and
+joining a session (`Y` or `A`, then `A` 1.5 s later, checked on the library's network restart), the 3 s (5 s after a
+match) before the room's settings are read back. Not checked by an effect: a guest's `L`, `A` back into the room
+between [Rounds](#rounds) (1.5 s and 2 s apart), measured at 60 frames a second only.
 
 ## Room settings
 
@@ -495,7 +543,7 @@ A host's file (round 1 of a session), shortened:
 ```
 
 Each team also has `count` (`+0xa8`: 100 at the start; the modes' count, inferred from two matches), and each player
-`weapon` (`+0x240`) and `gear` (`[head, clothes, shoes]`, `+0x2c8`, `+0x4d0`, `+0x6d8`), the game's ids. `abilities` (prototype): for each of the three pieces `[main, sub, sub, sub]` as ability enum values, -1 for an empty slot (the gear record's `+0x14`, `+0xa0`, `+0x118`, `+0x190`, which hold the ability's position in main's enum; measured in few matches). How far each field can be relied
+`weapon` (`+0x240`) and `gear` (`[head, clothes, shoes]`, `+0x2c8`, `+0x4d0`, `+0x6d8`), the game's ids. `abilities` (prototype): for each of the three pieces `[main, sub, sub, sub]` as ability enum values, -1 for an empty slot (the gear record's `+0x14`, `+0xa0`, `+0x118`, `+0x190`, which hold the ability's position in main's enum; measured in few matches). The main ability is the one the player's save gives the piece, a profile's `main_abilities` included; a room with `main_abilities_only=1` kept it while its sub slots read empty ([save-profile.md](save-profile.md), "Main abilities"). How far each field can be relied
 on: `rule`, `stage_id`, `win_team`, the teams' paint and share, every player's team, kills, assists, deaths,
 specials, paint, disconnected, weapon: read from the record the game shows on its result screens, equal in every
 player's file (the shared outcome); `count`, `gear`: measured on few matches; `deemed_result` (-1 in every match run)
@@ -573,7 +621,7 @@ on to a match server as it is. `"format": "splat3-match-options", "version": 1`;
 | `results_hold` | bounds and default |
 | `loadout` | `"profile"`: a player's weapon and gear come from its save (the launcher's `KLM_SAVE_PROFILE` before the start); the result reports each player's |
 | `match_loadout` | `KLM_MATCH_LOADOUT` works: `{"setting", "format": "save_profile", "fields": ["weapon", "gear"], "player_save_written": false, "progress_kept": false, "checked_in_result": true}` ([The match's save](#the-matchs-save)) |
-| `capabilities` | names of what this engine does beyond the members above; a launcher shows a feature only when its name is listed. `gear-abilities`: a save profile's `gear_abilities` and `chunks` are applied ([save-profile.md](save-profile.md)) |
+| `capabilities` | names of what this engine does beyond the members above; a launcher shows a feature only when its name is listed. `gear-abilities`: a save profile's `gear_abilities` and `chunks` are applied; `main-abilities`: its `main_abilities` are ([save-profile.md](save-profile.md)) |
 | `result` | the result file's version, outcomes (`completed`, `aborted`, `spectated`) and `seat` (the file has one) |
 
 A new member may appear in a later version; a member's meaning does not change within a version.
@@ -623,11 +671,14 @@ All runs were made on one Windows PC, with copies of the game talking over loopb
 - two players with one spectator and with two (three and four copies), the host in the stands, rounds with a
   spectator, a spectator who comes late, a spectator who vanishes in the match;
 - the disappearances of [When a member disappears](#when-a-member-disappears), each provoked once, and a player's
-  own departure ([Leave match](#leave-match)).
+  own departure ([Leave match](#leave-match));
+- the room screen's steps on a slow host ([Slow machines](#slow-machines)): two players in relay mode, the host held
+  to one CPU (35 to 44 frames a second), the lobby up to the teams in the room (`KLM_MATCH_BENCH=teams`), 11.3.0 only.
 
 Not verified: more than two players in a match (the row order with more than three guests, the confirm with more than
 four rows, the pre-match start with 8), copies on different PCs or across the internet, the SDL window back end
-(Linux), `deemed_result` and the `disconnected` flag of a player who left.
+(Linux), `deemed_result` and the `disconnected` flag of a player who left; a slow host with more than two players or
+below 30 frames a second, and a slow guest.
 
 ## Trust
 

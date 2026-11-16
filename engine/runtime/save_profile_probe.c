@@ -1,5 +1,6 @@
 // --probe-profile: save_profile's pieces that need no game files: the dropped gear list, the fields a new save is
-// missing, and the pruning of old backups (save_profile.c). The application to a save needs the game: docs/save-profile.md.
+// missing, the checks of gear_abilities and main_abilities, and the pruning of old backups (save_profile.c). The
+// application to a save needs the game: docs/save-profile.md.
 #include <stdio.h>
 #include <string.h>
 
@@ -52,6 +53,49 @@ int probe_profile(void) {
         CHECK(save_profile_gear_abilities_check(refused[i], en, sub, why, sizeof why) == -1 && why[0], refused[i]);
     CHECK(save_profile_gear_abilities_check("{\"gear_abilities\":{\"head\":[0,0,0]}}", NULL, sub, why, sizeof why) == -1,
           "no enum: refused");
+
+    // main_abilities against the same made-up enum and made-up parts' sets (no game files here): each part takes the
+    // sub-capable values and its own main-only one (head 100, clothes 101, shoes none), as the gear tables give them.
+    static const char en2[] = "None = -1 , Aa = 0 , Bb = 1 , Cc = 13 , Main = 100 , Other = 101";
+    static const int64_t head_set[] = {0, 1, 13, 100, -2}, clothes_set[] = {0, 1, 13, 101, -2}, shoes_set[] = {0, 1, 13, -2};
+    const int64_t *const sets[3] = {head_set, clothes_set, shoes_set};
+    int64_t mv[3];
+    CHECK(save_profile_main_abilities_check("{\"gear_abilities\":{\"head\":[0,0,0]}}", en2, sets, mv, why, sizeof why) == 0,
+          "no main_abilities: nothing");
+    CHECK(save_profile_main_abilities_check("{\"main_abilities\":null}", en2, sets, mv, why, sizeof why) == 0,
+          "main_abilities null: nothing");
+    CHECK(save_profile_main_abilities_check("{\"main_abilities\":{\"head\":\"Main\",\"clothes\":null,\"shoes\":13}}", en2, sets,
+                                            mv, why, sizeof why) == 5 &&
+              mv[0] == 100 && mv[2] == 13,
+          "a name, a value, null leaves the part");
+    CHECK(save_profile_main_abilities_check("{\"main_abilities\":{\"clothes\":\"Other\",\"head\":1}}", en2, sets, mv, why,
+                                            sizeof why) == 3 &&
+              mv[0] == 1 && mv[1] == 101,
+          "a sub-capable ability and the part's own main-only one");
+    CHECK(save_profile_main_abilities_check("{\"main_abilities\":{\"shoes\":\"Main\"}}", en2, NULL, mv, why, sizeof why) == 4 &&
+              mv[2] == 100,
+          "without sets any value of the enum from 0");
+    static const char *const main_refused[] = {
+        "{\"main_abilities\":[1]}",                     // not an object
+        "{\"main_abilities\":\"Aa\"}",
+        "{\"main_abilities\":{\"hat\":0}}",             // an unknown part
+        "{\"main_abilities\":{\"head\":\"aa\"}}",       // not a name of the enum
+        "{\"main_abilities\":{\"head\":\"A\"}}",
+        "{\"main_abilities\":{\"head\":2}}",            // not a value of the enum
+        "{\"main_abilities\":{\"head\":0.5}}",
+        "{\"main_abilities\":{\"head\":true}}",
+        "{\"main_abilities\":{\"head\":[0]}}",
+        "{\"main_abilities\":{\"head\":\"None\"}}",     // a main slot is never empty
+        "{\"main_abilities\":{\"head\":-1}}",
+        "{\"main_abilities\":{\"head\":101}}",          // another part's main-only ability
+        "{\"main_abilities\":{\"shoes\":\"Main\"}}",
+        "{\"main_abilities\":{\"head\":0,\"clothes\":100}}",
+    };
+    for (size_t i = 0; i < sizeof main_refused / sizeof *main_refused; i++)
+        CHECK(save_profile_main_abilities_check(main_refused[i], en2, sets, mv, why, sizeof why) == -1 && why[0],
+              main_refused[i]);
+    CHECK(save_profile_main_abilities_check("{\"main_abilities\":{\"head\":0}}", NULL, sets, mv, why, sizeof why) == -1,
+          "main_abilities without an enum: refused");
 
     char root[1024], dir[1100], p[1200];
     if (!plat_exe_path(root, sizeof root)) return 1;

@@ -747,8 +747,8 @@ static void tab_screen(float scale) {
     opt_toggle("TOTK_DYNAMIC_RES", UI_MENU_DYNAMIC_RES, UI_MENU_DYNAMIC_RES_DESC);
     row_shadow_res();
     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR4, UI_MENU_UPSCALER_FSR3, UI_MENU_UPSCALER_FSR,
-                                  UI_MENU_UPSCALER_DLSS, UI_MENU_UPSCALER_DLAA, UI_MENU_UPSCALER_BILINEAR};
-    opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 6, UI_MENU_UPSCALER_DESC);
+                                  UI_MENU_UPSCALER_BILINEAR};
+    opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 4, UI_MENU_UPSCALER_DESC);
     opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
     static const UiTextId aspect[] = {UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH};
     opt_choice("TOTK_ASPECT", UI_MENU_ASPECT, aspect, 2, UI_MENU_ASPECT_DESC);
@@ -1528,8 +1528,8 @@ static void tab_ink_display(float scale) {
         row_fps_limit();
     } else if (sec == 1) {
         static const UiTextId up[] = {UI_MENU_UPSCALER_FSR4, UI_MENU_UPSCALER_FSR3, UI_MENU_UPSCALER_FSR,
-                                      UI_MENU_UPSCALER_DLSS, UI_MENU_UPSCALER_DLAA, UI_MENU_UPSCALER_BILINEAR};
-        opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 6, UI_MENU_UPSCALER_DESC);
+                                      UI_MENU_UPSCALER_BILINEAR};
+        opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 4, UI_MENU_UPSCALER_DESC);
         opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
         static const char *const aniso[] = {"game", "2", "4", "8", "16"};
         const char *aniso_names[] = {menu_text(UI_MENU_ANISO_GAME), "2x", "4x", "8x", "16x"};

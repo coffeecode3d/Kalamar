@@ -266,7 +266,7 @@ fn main() {
                 let ini = kalamar_lib::install::ini_path(&game_root);
                 let changes: Vec<kalamar_lib::settings::Change> = PROBE_SETTINGS.iter().map(|(k, v)| kalamar_lib::settings::Change { key: k.to_string(), value: Some(v.to_string()) }).collect();
                 let r = kalamar_lib::settings::save(&ini, &schema, &changes);
-                let p = kalamar_lib::profile::validate_profile(&probe_profile(&cat), &cat, None);
+                let p = kalamar_lib::profile::validate_profile(&probe_profile(&cat), &cat, None, None);
                 match (&r, &p) {
                     (Ok(_), Ok(p)) => {
                         kalamar_lib::profile::save_profile(dir, p).expect("profile saved");

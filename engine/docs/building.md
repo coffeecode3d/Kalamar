@@ -189,8 +189,10 @@ Splatoon 3 11.3.0 (`splatoon3-v1130`) is built the same way from the base game a
 below with `splatoon3-v1130` and its own work folder. Its `sdk` and `rtld` are the same files; `main` was rebuilt, so
 everything keyed on a `main` offset has a row per build: the spin waits (`recomp/patches-splatoon3-v1130.txt`, from
 `tools/spin_waits.py` on the new `main`), the `--boot` values of `recomp/targets.py`, and the offsets the start scene
-and the automatic match use (`runtime/splat3_addr.c`). That file also holds the tag the build's RomFS puts in the names
-of its tables and message archives (`b20` for 11.2.0, `b30` for 11.3.0). A later build gets its rows from a known one with
+and the automatic match use (`runtime/splat3_addr.c`). 11.3.0's table also has the `mouse_native` and `input_first` sets,
+and its row the gyro tuning and camera offsets of `runtime/mouse_native.c` and the gyro processor of
+`runtime/input_first.c`, none carried to 11.2.0. That file also holds the tag the build's RomFS puts in the names of its
+tables and message archives (`b20` for 11.2.0, `b30` for 11.3.0). A later build gets its rows from a known one with
 `tools/port_offsets.py --old <known exefs> --new <new exefs> --code ... --data ... --string ... --patches <known
 table>`: it matches the two builds' code and says for each offset where it went, how it was matched and whether the
 match is certain. Its report holds offsets and counts only.

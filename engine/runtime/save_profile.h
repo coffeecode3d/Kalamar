@@ -31,6 +31,12 @@ int save_profile_missing_appearance(const char *json, char *names, size_t cap);
 // ("None = -1 , <name> = 0 , ..."): the parts given as a bit mask (1 head, 2 clothes, 4 shoes) with their three sub
 // abilities in sub (enum values, -1 empty), or -1 and why when it is refused.
 int save_profile_gear_abilities_check(const char *json, const char *enum_s, int64_t sub[3][3], char *why, size_t cap);
+// A profile's main_abilities (JSON text) checked against an ability enum string in that form and, per part (0 head,
+// 1 clothes, 2 shoes), the enum values a main slot of that part may take (allowed[part], a list ending with -2, as the
+// game's gear tables give them at run time; allowed NULL: any value of the enum from 0): the parts given as a bit mask
+// with their main ability in main_v (an enum value), or -1 and why when it is refused.
+int save_profile_main_abilities_check(const char *json, const char *enum_s, const int64_t *const allowed[3],
+                                      int64_t main_v[3], char *why, size_t cap);
 // The value of the entry at position pos of main's ability enum (0: its first entry, the empty value -1), as the save
 // stores an ability; -2 when main has no such entry (auto_match.c: the match record numbers abilities by position).
 int64_t save_profile_ability_at(int pos);

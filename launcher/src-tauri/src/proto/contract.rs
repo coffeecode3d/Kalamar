@@ -180,12 +180,13 @@ pub fn resolve_loadout(cons: &[(String, Constraint)], picks: &HashMap<String, St
     (chosen, open)
 }
 
-/// The engine's `SPLAT3_MATCH_LOADOUT` file (a save profile naming `weapon` and `gear`, and `gear_abilities` for the
-/// parts that carry gear; numeric ids as numbers). `subs`: the player's chosen sub abilities by part (`head`, `clothes`,
-/// `shoes`: three slots of an ability name or `None`), those of the Locker's profile; a part the loadout names gear for
-/// takes them, whatever piece the loadout puts there, exactly as the Locker's profile does for its own piece. Nothing
-/// is added for a part without chosen abilities (the match's copy of the save keeps what it has).
-pub fn loadout_profile(chosen: &[(String, String)], subs: &HashMap<String, Vec<Option<String>>>) -> Value {
+/// The engine's `SPLAT3_MATCH_LOADOUT` file (a save profile naming `weapon` and `gear`, and `gear_abilities` and
+/// `main_abilities` for the parts that carry gear; numeric ids as numbers). `subs`: the player's chosen sub abilities by
+/// part (`head`, `clothes`, `shoes`: three slots of an ability name or `None`), those of the Locker's profile; `mains`:
+/// the player's chosen main ability by part. A part the loadout names gear for takes them, whatever piece the loadout
+/// puts there, exactly as the Locker's profile does for its own piece. Nothing is added for a part without chosen
+/// abilities (the match's copy of the save keeps what it has). An engine without `main-abilities` ignores that member.
+pub fn loadout_profile(chosen: &[(String, String)], subs: &HashMap<String, Vec<Option<String>>>, mains: &HashMap<String, String>) -> Value {
     let id = |s: &str| s.parse::<i64>().map(Value::from).unwrap_or_else(|_| Value::from(s));
     let mut v = json!({"version": 1});
     for (slot, x) in chosen {
@@ -200,6 +201,12 @@ pub fn loadout_profile(chosen: &[(String, String)], subs: &HashMap<String, Vec<O
                         v["gear_abilities"] = json!({});
                     }
                     v["gear_abilities"][part] = json!(slots);
+                }
+                if let Some(name) = mains.get(part) {
+                    if v.get("main_abilities").is_none() {
+                        v["main_abilities"] = json!({});
+                    }
+                    v["main_abilities"][part] = json!(name);
                 }
             }
             _ => v[slot.as_str()] = id(x),
@@ -545,6 +552,7 @@ mod tests {
             rounds_faster: false,
             stage_list: "host_save".into(),
             gear_abilities: false,
+            main_abilities: false,
         }
     }
 
@@ -763,7 +771,7 @@ mod tests {
         assert_eq!(last[0], ("weapon".to_string(), "30".to_string()));
         assert_eq!(last.len(), 2, "denied shoes with nothing compliant known: left to the save");
         let none = HashMap::new();
-        assert_eq!(loadout_profile(&last, &none), json!({"version": 1, "weapon": 30, "gear": {"head": 1004}}));
+        assert_eq!(loadout_profile(&last, &none, &HashMap::new()), json!({"version": 1, "weapon": 30, "gear": {"head": 1004}}));
     }
 
     #[test]
@@ -776,15 +784,30 @@ mod tests {
         let chosen = vec![("weapon".to_string(), "30".to_string()), ("gear.head".to_string(), "1004".to_string()), ("gear.clothes".to_string(), "8031".to_string())];
         // head: the player's three slots; clothes: nothing chosen, so nothing added; shoes: no gear named, so none
         assert_eq!(
-            loadout_profile(&chosen, &subs),
+            loadout_profile(&chosen, &subs, &HashMap::new()),
             json!({"version": 1, "weapon": 30, "gear": {"head": 1004, "clothes": 8031}, "gear_abilities": {"head": ["Alpha", null, "Alpha"]}})
         );
         // an explicit "empty" is carried as three nulls, like the Locker's profile
         let shoes = vec![("gear.shoes".to_string(), "4024".to_string())];
-        assert_eq!(loadout_profile(&shoes, &subs)["gear_abilities"]["shoes"], json!([null, null, null]));
+        assert_eq!(loadout_profile(&shoes, &subs, &HashMap::new())["gear_abilities"]["shoes"], json!([null, null, null]));
         // a weapon-only loadout never carries abilities, and no chosen abilities leaves the file as it was
-        assert_eq!(loadout_profile(&[("weapon".to_string(), "5".to_string())], &subs), json!({"version": 1, "weapon": 5}));
-        assert!(loadout_profile(&chosen, &HashMap::new()).get("gear_abilities").is_none());
+        assert_eq!(loadout_profile(&[("weapon".to_string(), "5".to_string())], &subs, &HashMap::new()), json!({"version": 1, "weapon": 5}));
+        assert!(loadout_profile(&chosen, &HashMap::new(), &HashMap::new()).get("gear_abilities").is_none());
+    }
+
+    #[test]
+    fn a_loadout_carries_the_players_main_abilities_for_the_gear_it_names() {
+        let mains: HashMap<String, String> = [("head".to_string(), "Beta".to_string()), ("shoes".to_string(), "Gamma".to_string())].into();
+        let chosen = vec![("weapon".to_string(), "30".to_string()), ("gear.head".to_string(), "1004".to_string()), ("gear.clothes".to_string(), "8031".to_string())];
+        // head: the player's choice; clothes: none chosen, nothing added; shoes: no gear named, so none
+        assert_eq!(
+            loadout_profile(&chosen, &HashMap::new(), &mains),
+            json!({"version": 1, "weapon": 30, "gear": {"head": 1004, "clothes": 8031}, "main_abilities": {"head": "Beta"}})
+        );
+        let subs: HashMap<String, Vec<Option<String>>> = [("head".to_string(), vec![Some("Alpha".to_string()), None, None])].into();
+        let both = loadout_profile(&chosen, &subs, &mains);
+        assert_eq!((both["gear_abilities"]["head"].clone(), both["main_abilities"]["head"].clone()), (json!(["Alpha", null, null]), json!("Beta")));
+        assert_eq!(loadout_profile(&[("weapon".to_string(), "5".to_string())], &subs, &mains), json!({"version": 1, "weapon": 5}));
     }
 
     #[test]

@@ -15,6 +15,8 @@
 #include "host.h"
 #include "input.h"
 #include "mgyro_bench.h"
+#include "mouse_native.h"
+#include "nvn_api.h"
 #include "ov.h"
 #include "platform/platform.h"
 
@@ -87,6 +89,7 @@ static void npad_states(Cpu *c, uint32_t want) {
     uint32_t id = *need_id(c, 2, "GetNpadStates");
     if (max <= 0) { ret_x(c, 0); return; }
     if (!out) rt_fatal("nn::hid::GetNpadStates: null output");
+    nvn_input_gate();   // nvn_api_obj.c: the frame's wait, so buttons and sticks are read as late as the frame allows
     plat_mutex_lock(&lock);
     NpadState s = {.sampling = ++sample};
     int live = want && enabled && allowed && id == pad_id() && want == pad_style() && (styles & want);
@@ -479,10 +482,13 @@ static void ov_six_stop(Cpu *c) {
 static int six_fill(MotionState *s, int max, const uint32_t *h, const char *fn) {
     if (max <= 0) return 0;
     if (!s) rt_fatal("nn::hid::detail::%s: null output", fn);
-    MotionFusion *src = six_axis_ours(h, fn) && six_running ? input_motion_source() : NULL;   // the mouse's or the gamepad's
+    int ours = six_axis_ours(h, fn);
+    MotionFusion *src = ours && six_running ? input_motion_source() : NULL;   // the mouse's or the gamepad's
+    nvn_input_gate();   // nvn_api_obj.c: the frame's wait, so the read is as late as the frame allows
     uint64_t now = kern_now_ns();
     int n = !src ? 0 : input_motion_is_mouse(src) ? input_mouse_gyro_read(s, max, now) : motion_read(src, s, max, now);
-    if (src) mgb_read(s, n, now);   // TOTK_MGYRO_BENCH (mgyro_bench.c): what the game is handed, and its aim now
+    if (ours) mouse_native_read(src && input_motion_is_mouse(src));   // the game's gyro smoothing, off for the mouse
+    if (src) mgb_mark("read", 0), mgb_read(s, n, now);   // TOTK_MGYRO_BENCH (mgyro_bench.c): what the game is handed, and its aim now
     if (!n) {
         static const MotionState rest = {.acc = {0, 0, -1}, .dir = {1, 0, 0, 0, 1, 0, 0, 0, 1}};
         for (int i = 0; i < max; i++) s[i] = rest;

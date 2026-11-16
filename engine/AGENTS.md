@@ -52,8 +52,8 @@ is read when there is no `kalamar.ini`.
   them `--exefs` and `--modules main,sdk` for Splatoon 3 (no `subsdk`). A change to those headers also recompiles every
   player's generated code: the top-level [AGENTS.md](../AGENTS.md), rule 8.
 - Code that knows TotK's addresses or data runs for TotK only (`rt_target`, `runtime/host.h`); Splatoon 3's patch
-  tables hold spin waits only (`recomp/patches-splatoon3-v1130.txt`, `-v1120.txt`); a new game version is ported
-  with `tools/port_offsets.py`.
+  tables hold spin waits and, for 11.3.0 only, the `mouse_native` and `input_first` sets
+  (`recomp/patches-splatoon3-v1130.txt`, `-v1120.txt`); a new game version is ported with `tools/port_offsets.py`.
 - Graphics bugs: [docs/maxwell.md](docs/maxwell.md) lists the Maxwell behavior the Vulkan path must match.
 - Comments say what the code does and why, in words that stand on their own. Cite this project's code by file and
   function (a line number may follow as a hint) and other projects' code by project, file and function: `refs/` moves,

@@ -36,7 +36,7 @@
 import schemaJson from "../../../src-tauri/resources/settings-schema.json";
 import { emit } from "./event";
 import { markDialogDone } from "../../update/prompt";
-import { MOCK_SUB_ABILITIES, STAGE_IDS, catalogue, stagesView } from "./catalogue";
+import { MOCK_MAIN_ABILITIES, MOCK_SUB_ABILITIES, STAGE_IDS, catalogue, stagesView } from "./catalogue";
 import { mockDraft, mockDraftAct, mockDraftMatch } from "./draft";
 import { META_STANDS, OLD_REFUSAL, ROOM_FIELDS, ROOM_STANDS, standsDraft, standsMatch, standsRoom, standsRunner, watchable } from "./stands";
 
@@ -171,13 +171,15 @@ function peek(): any[] {
     : { id: s.id, session: { logged_in: false, provider: null, user_id: null, display_name: null }, description: L("Petit serveur du nord : salons privés et soirées à thème le vendredi.", "A small server up north: private rooms and themed Friday nights.", "Un pequeño servidor del norte: salas privadas y noches temáticas los viernes.", "北の小さなサーバー：プライベートルームと金曜のテーマナイト。"), features: ["rooms", "friends", "activities", ...(S.pop ? ["population"] : [])] });
 }
 
+let presets: any[] = [];
 // ---- profile ------------------------------------------------------------------------------------------------------
 let profile: any = S.profile === "empty"
-  ? { schema: 1, name: "", style: null, skin: null, eyes: null, hair: null, eyebrows: null, legwear: null, legwear_variation: null, head: null, clothes: null, shoes: null, weapon: null, banner: null, title: { adjective: null, subject: null }, badges: [null, null, null], sub_abilities: { head: null, clothes: null, shoes: null } }
+  ? { schema: 1, name: "", style: null, skin: null, eyes: null, hair: null, eyebrows: null, legwear: null, legwear_variation: null, head: null, clothes: null, shoes: null, weapon: null, banner: null, title: { adjective: null, subject: null }, badges: [null, null, null], sub_abilities: { head: null, clothes: null, shoes: null }, main_abilities: { head: null, clothes: null, shoes: null } }
   : {
     schema: 1, name: "Mira", style: 1, skin: 3, eyes: 5, hair: S.profile === "incomplete" ? null : 2, eyebrows: 1, legwear: S.profile === "incomplete" ? null : 3, legwear_variation: 1,
     head: 4, clothes: 9, shoes: 2, weapon: 7, banner: 5, title: { adjective: 2, subject: 4 }, badges: [3, null, 11],
     sub_abilities: { head: ["a0", "a2", "a2"], clothes: ["a1", null, null], shoes: null },
+    main_abilities: { head: "a5", clothes: null, shoes: null },
   };
 
 function preflight(): any {
@@ -469,6 +471,7 @@ function request(method: string, path: string, body?: any): any {
     if (p === "/v1/matches/m-1" && draftNow) return draftNow;
     if (p === "/v1/queues") return { items: queues };
     if (p === "/v1/friends") return { items: [{ user: opponent, presence: "online", since: "2026-10-20T18:00:00Z" }, { user: user("u-3", "Sacha"), presence: "in_match", since: "2026-10-22T18:00:00Z" }] };
+    if (p === "/v1/blocks") return { items: [{ user: user("u-9", "Mako"), since: "2026-11-01T10:00:00Z" }] };
     if (p === "/v1/friends/requests") return { incoming: [{ id: "fr-1", user: user("u-4", "Noor") }], outgoing: [] };
     if (p === "/v1/ladders") return { items: [{ id: "1v1", name: L("Duel", "Duel", "Duelo", "デュエル"), primary: true, season: { id: "s1", name: L("Saison 1", "Season 1", "Temporada 1", "シーズン1") } }, { id: "4v4", name: L("Équipe", "Team", "Equipo", "チーム") }] };
     if (/\/ratings$/.test(p)) return { items: [{ ladder: "1v1", display: "1 214", tier: { id: "gold", name: L("Or", "Gold", "Oro", "ゴールド"), color: "#e0b43b" }, progress: { value: 64, max: 100, label: L("64 / 100 vers Platine", "64 / 100 to Platinum", "64 / 100 hacia Platino", "プラチナまで 64 / 100") }, last_change: { delta: 14 } }] };
@@ -645,9 +648,37 @@ export async function handle(cmd: string, args: any): Promise<any> {
     // Before a running install's merge is complete the Locker has only the neutral list.
     case "profile_catalogue": return snap.active && !snap.game_data ? { ...catalogue(), origin: "neutral", reason: "the game data is not merged yet" } : catalogue();
     case "gamedata_stages": return stagesView(S.stages === "none");
-    case "gear_abilities_info": return S.gear === "old" ? { supported: false, update_needed: true, abilities: [] } : S.gear === "none" ? { supported: false, update_needed: false, abilities: [] } : { supported: true, update_needed: false, abilities: MOCK_SUB_ABILITIES };
+    // ?gear=old: an engine from before both; ?gear=sub: one that applies sub-abilities but not the main ability; ?gear=none: no game
+    case "gear_abilities_info": {
+      const off = { supported: false, update_needed: S.gear === "old", abilities: [] };
+      const subs = S.gear === "old" || S.gear === "none" ? off : { supported: true, update_needed: false, abilities: MOCK_SUB_ABILITIES };
+      const main = S.gear === "old" || S.gear === "sub" ? { main_supported: false, main_update_needed: true, main_abilities: [] }
+        : S.gear === "none" ? { main_supported: false, main_update_needed: false, main_abilities: [] }
+        : { main_supported: true, main_update_needed: false, main_abilities: MOCK_MAIN_ABILITIES };
+      return { ...subs, ...main };
+    }
     case "profile_load": return profile;
     case "profile_save": profile = { ...args.profile }; return profile;
+    // Loadout presets: kept in memory, with the same rules as the backend (trimmed unique names, at most 30).
+    case "loadouts_list": return presets;
+    case "loadouts_save": {
+      const name = String(args.name).trim();
+      if (!name || [...name].length > 24) throw { ...fail("validation", "invalid name"), fields: [{ key: "name", message: "name must be 1 to 24 characters" }] };
+      const i = presets.findIndex((p) => p.name.toLowerCase() === name.toLowerCase());
+      if (i >= 0) presets[i] = { ...args.loadout, name };
+      else if (presets.length >= 30) throw fail("invalid_input", "at most 30 presets can be saved");
+      else presets.push({ ...args.loadout, name });
+      return presets;
+    }
+    case "loadouts_rename": {
+      const to = String(args.to).trim();
+      const i = presets.findIndex((p) => p.name.toLowerCase() === String(args.from).toLowerCase());
+      if (i < 0) throw fail("invalid_input", "no such preset");
+      if (!to || [...to].length > 24 || presets.some((p, k) => k !== i && p.name.toLowerCase() === to.toLowerCase())) throw { ...fail("validation", "invalid name"), fields: [{ key: "name", message: "name is empty, too long or already used" }] };
+      presets[i] = { ...presets[i], name: to };
+      return presets;
+    }
+    case "loadouts_delete": presets = presets.filter((p) => p.name.toLowerCase() !== String(args.name).toLowerCase()); return presets;
     case "gamedata_icon_cache": return { files: 1832, bytes: 61_000_000, warming: false, dir: "C:\\Users\\user\\AppData\\Roaming\\dev.kalamar.launcher\\icons" };
     case "servers_view": return serversView();
     case "server_select": selectedId = args.id; return serversView();

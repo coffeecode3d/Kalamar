@@ -91,8 +91,8 @@ worn on each part (headgear, clothing, shoes), and the Locker's options add a fu
   cleared (a part left out, or `null`, changes nothing). `chunks` is `"max"` when the option is on and absent
   otherwise (an absent member leaves the stock as it is). The runtime raises a piece with fewer than two stars to two
   when it writes its sub-abilities (the game ties the slot count to the stars), so the piece shows with 2 stars in
-  the game; the main ability is not editable. A room option "main abilities only" on a community server makes a match
-  ignore sub-abilities.
+  the game. A room option "main abilities only" on a community server makes a match ignore sub-abilities. The main
+  ability has a section of its own below.
 - **Which abilities fit a sub slot.** The game's ability enum numbers the abilities a sub slot can hold from 0 and
   those only a main slot has from 100. The enum (name to value) is what the install wizard's keys step reads from the
   player's own `main` into `kit-tools\profile\s3save.keys.json` (member `abilities`). `game/subs.rs` reads that member
@@ -113,3 +113,43 @@ worn on each part (headgear, clothing, shoes), and the Locker's options add a fu
   `chunks` and shown in the Gear tab (`refusal.sub_*` in the locales).
 - `kit-tools\profile\s3save.py profile` is a developer aid the launcher never runs: it is not extended for these
   fields.
+
+## Main abilities
+
+The Gear tab also lets the player choose the main ability of the piece worn on each part, in a main slot beside the
+three sub slots.
+
+- **The profile.** `profile.json` keeps `"main_abilities": {"head": "NameA", "clothes": null, "shoes": null}` (schema
+  stays 1, as for `sub_abilities`). Per part, `null` means never chosen: the save keeps the piece's main ability as it
+  is, and the slot shows the piece's own (`Entry::ability` in the catalogue). A choice is one ability name of the
+  player's game; a main slot is never empty. Choosing the piece's own ability back ("Piece's own main ability") is a
+  choice too, sent like any other: that is how a main ability written by an earlier launch is undone. Like the
+  sub-abilities, the choice belongs to the part, not to the piece: another piece chosen for the part gets it too.
+- **Which abilities fit a main slot of a part.** The engine takes any ability of the game's enum but the empty one,
+  provided a player piece of that part has it as its main ability in the game: every ability a sub slot can hold, plus
+  the main-only abilities of that part (the engine's `docs/save-profile.md`, "Main abilities"). Measured: the game keeps
+  any main ability written in the save, but a match where a worn piece has another part's main-only ability does not
+  start, so the engine refuses that profile. `game/subs.rs` reads the enum's names from 0 (`read_main_capable`), and
+  `profile::part_main_abilities` the main abilities of the part's selectable pieces in the catalogue; the picker offers
+  the names found in both (`subSlots.ts`, `mainChoices`), by name, with the piece's own marked, and `profile::validate_profile`
+  checks a choice the same way. No ability name is in the launcher.
+- **What the runtime gets** (`profile::to_runtime`): `main_abilities` holds the parts that have a chosen piece in the
+  profile and a choice, each as one name (`{"head": "NameA"}`). A part with no chosen piece is left out, as for the
+  sub-abilities.
+- **The gate.** The main slot appears when the installed game's engine lists the capability `main-abilities` and the
+  ability list could be read (`gear_abilities_info`: `main_supported`, `main_update_needed`, `main_abilities`;
+  `Caps::main_abilities`). An engine built before it applies the sub-abilities but ignores `main_abilities` without a
+  word, so the Gear tab then shows the sub slots and one line that the main ability needs a game update, with the same
+  "Game update available" button. Stored choices are kept meanwhile.
+- **Presets** store the main abilities with the rest of the loadout (`loadouts.json`, `main_abilities`), only when the
+  installed game applies them, and apply them the same way; a name the part cannot take is dropped, and a preset saved
+  before this field applies none.
+- **A match's loadout** carries `main_abilities` for each part it names gear for, from the player's choice in the
+  Locker (`contract::loadout_profile`); an engine without the capability ignores the member. What is reported to the
+  server stays ids only.
+- **Rooms.** A room set to "main abilities only" ignores the sub-abilities, not the main ability: measured, the
+  record of such a match listed the chosen main ability for that player in both players' result files. So such a
+  room does not mean the pieces' own main abilities once players can choose them.
+- **Refusals** of the runtime for this field (a name the game does not know, an ability no piece of that part has, the
+  empty value, a malformed member, gear the save does not own) are mapped in `profile::classify_refusal` to
+  `main_abilities.<part>` and shown in the Gear tab (`refusal.main_*` in the locales).

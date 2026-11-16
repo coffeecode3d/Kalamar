@@ -273,6 +273,9 @@ export const community = {
   "f.presence.offline": "offline",
   "f.block": "Block",
   "f.block.confirm": "Block {name}? You will no longer be friends and they will not be able to invite you.",
+  "f.blocked": "Blocked players",
+  "f.blocked.lead": "They cannot invite you or send you a friend request. Unblocking does not make you friends again.",
+  "f.unblock": "Unblock",
 
   "r.ladders": "Ladders",
   "r.none": "No ladder on this server.",

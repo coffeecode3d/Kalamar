@@ -1,4 +1,35 @@
-# Code patches for Splatoon 3 11.3.0 (recomp/patches.py, gen.py --target splatoon3-v1130).
+# Code patches for Splatoon 3 11.3.0 (recomp/patches.py, gen.py --target splatoon3-v1130): three patch sets and the spin
+# waits. 11.2.0 has the spin waits only (patches-splatoon3-v1120.txt).
+
+# Native mouse aiming (runtime/mouse_native.c, TOTK_MOUSE_NATIVE): five sites of the player camera's update
+# (main+0x28f4e20) become a bl to a host function that does what the game does unless the mouse is the sensor: the yaw
+# damping (the frame's yaw turn times the damping gain) at patch page +0xf60 (main+0x61f9f60), the pitch follow (the
+# share of the distance to the pitch target moved this frame) at page +0xf50, the yaw turn (gain times rate, where the
+# yaw gain is read) at page +0xf30, and its two calls of the pitch curve (main+0x28fba70, gyro and plain paths) at
+# page +0xf40, which calls the curve itself. The function saves x30 in its prologue and reads it only to return.
+set mouse_native TOTK_MOUSE_NATIVE_PATCH 1
+site mouse_native main 28f6984 1e20098b 94e40d77   # fmul s11, s12, s0 (yaw turn * damping gain)
+site mouse_native main 28f9ae0 1e2209e1 94e4011c   # fmul s1, s15, s2 (pitch follow share)
+site mouse_native main 28f66f8 1e29090c 94e40e0e   # fmul s12, s8, s9 (yaw gain * yaw rate)
+site mouse_native main 28f7560 94001144 94e40a78   # bl pitch curve (gyro path)
+site mouse_native main 28f7660 94001104 94e40a38   # bl pitch curve (plain path)
+
+# Input first (runtime/input_first.c, TOTK_INPUT_FIRST): the system task's frame reads the controllers and runs the
+# gyro processor before its logic jobs instead of after them. Each site's bl goes to a host function on the patch
+# page. Where the task would start the logic jobs early, at the end of the previous frame (main+0x4da11c0 and
+# main+0x4da1360, the task's two bases), the load of its flags hides the "start them early" bit while the setting is
+# on (page +0xf00), so its main step (main+0x4da1500) runs them; there, before the jobs, a host function updates the
+# controllers and runs the gyro processor (page +0xee0, the load kept). The main step's own call of the update then
+# goes to a host function that does nothing (page +0xed0), and when a late job runs the gyro processor (main+0x2afaf6c)
+# its work is skipped, so it only hands out again what that work left (page +0xef0). The last site counts the
+# frame function's draws for the late-input gate (page +0xf20). x30, which each bl writes, is not live at the sites.
+set input_first TOTK_INPUT_FIRST_PATCH 1
+site input_first main 4da1274 b944f268 94516323   # ldr w8, [x19, #0x4f0] (the early start's flags)
+site input_first main 4da1414 b9430a68 945162bb   # ldr w8, [x19, #0x308] (the same for the other base)
+site input_first main 4da1858 f9426277 f9426277 945161a2   # ldr x23, [x19, #0x4c0] (the main step starts the jobs)
+site input_first main 4da1a60 f9405908 9451611c   # ldr x8, [x8, #0xb0] (the controller manager's update)
+site input_first main 2afafac 9400019d 94dbfbd1   # bl <the gyro processor's work> (main+0x2afaf6c)
+site input_first main 452a73c f9407508 94733df9   # ldr x8, [x8, #0xe8] (the framework's draw)
 
 # Patch sets: the runtime switches these (recomp/patches.py "set"; runtime/patches.c). fps60 is the frame-rate one.
 # 60: 1 by default, and the frame limit turns it off at 30 (runtime/frame_rate.c frame_limit_live), so the "fps_limit"

@@ -20,6 +20,7 @@
 #include "cfg.h"
 #include "gfx.h"
 #include "host.h"
+#include "mgyro_bench.h"
 #include "nvn_api.h"
 #include "nvn_hmap.h"
 #include "platform/platform.h"
@@ -766,6 +767,7 @@ NVN_API(nvnCommandBufferBeginRecording) {
     put_hdr(cmd_alloc(o, 8), OP_BEGIN, 8);
     o->hw_used -= 8;   // BEGIN and END have no hardware equivalent
     o->hw_start = o->hw_used;
+    if (mgb_detail()) mgb_mark2("cbeg", c->x[0], c->x[30]);
     if (!o->game_size) memory_event(c, o, NVN_COMMAND_BUFFER_MEMORY_EVENT_OUT_OF_COMMAND_MEMORY, MIN_COMMAND_SIZE);
 }
 // NVNcommandHandle nvnCommandBufferEndRecording(NVNcommandBuffer *cmd)
@@ -782,6 +784,7 @@ NVN_API(nvnCommandBufferEndRecording) {
     uintptr_t hi = o->ctl ? lo + 1 : 0;
     o->ctl_used += CTL_PER_RECORDING;
     copy_add(lo, hi, copy);
+    if (mgb_detail()) mgb_mark2("cend", c->x[0], (uintptr_t)copy);
     ret_x(c, (uintptr_t)copy);
 }
 // NVNboolean nvnCommandBufferIsRecording(const NVNcommandBuffer *cmd)
@@ -808,13 +811,19 @@ NVN_API(nvnCommandBufferCallCommands) {
     cmd_t *o = cmd_of(c);
     int n = (int)arg_x(c, 1);
     const uint64_t *h = arg_p(c, 2);
-    for (int i = 0; i < n; i++) inline_recording(o, h[i], "CallCommands");
+    for (int i = 0; i < n; i++) {
+        if (mgb_detail()) mgb_mark2("ccall", c->x[0], h[i]);
+        inline_recording(o, h[i], "CallCommands");
+    }
 }
 NVN_API(nvnCommandBufferCopyCommands) {
     cmd_t *o = cmd_of(c);
     int n = (int)arg_x(c, 1);
     const uint64_t *h = arg_p(c, 2);
-    for (int i = 0; i < n; i++) inline_recording(o, h[i], "CopyCommands");
+    for (int i = 0; i < n; i++) {
+        if (mgb_detail()) mgb_mark2("ccopy", c->x[0], h[i]);
+        inline_recording(o, h[i], "CopyCommands");
+    }
 }
 
 // ---------- CommandBuffer: commands with CPU-visible results (performed by the back end in GPU order)

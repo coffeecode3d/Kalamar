@@ -292,6 +292,9 @@ impl GameHost for HostRef {
     fn current_sub_abilities(&self) -> std::collections::HashMap<String, Vec<Option<String>>> {
         self.0.current_sub_abilities()
     }
+    fn current_main_abilities(&self) -> std::collections::HashMap<String, String> {
+        self.0.current_main_abilities()
+    }
 }
 
 fn standin() -> Option<PathBuf> {

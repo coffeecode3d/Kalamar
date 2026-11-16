@@ -38,11 +38,11 @@
     [UI_MENU_DYNAMIC_RES] = "Resolución dinámica",
     [UI_MENU_DYNAMIC_RES_DESC] = "Permite que el juego reduzca la escena 3D al 90 o al 80 %. Lo decide con una estimación hecha para la Switch que ignora tu GPU, así que las escenas amplias bajan incluso en un PC rápido. No mantiene la escala de renderizado.",
     [UI_MENU_UPSCALER] = "Escalado a la ventana",
-    [UI_MENU_UPSCALER_DESC] = "Cómo se escala la imagen cuando la ventana es mayor que la resolución del juego. FSR 4.1 y 3.1 necesitan el runtime FidelityFX de AMD junto al ejecutable; DLSS y DLAA, una GPU NVIDIA RTX y un reinicio. FSR conserva los "
+    [UI_MENU_UPSCALER_DESC] = "Cómo se escala la imagen cuando la ventana es mayor que la resolución del juego. FSR 4.1 y 3.1 necesitan el runtime FidelityFX de AMD junto al ejecutable. FSR conserva los "
                               "bordes y el detalle con más nitidez que el bilineal.",
     [UI_MENU_UPSCALER_FSR4] = "AMD FSR 4.1", [UI_MENU_UPSCALER_FSR3] = "AMD FSR 3.1",
-    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_DLSS] = "NVIDIA DLSS",
-    [UI_MENU_UPSCALER_DLAA] = "NVIDIA DLAA", [UI_MENU_UPSCALER_BILINEAR] = "Bilineal",
+    [UI_MENU_UPSCALER_FSR] = "AMD FSR 1",
+    [UI_MENU_UPSCALER_BILINEAR] = "Bilineal",
     [UI_MENU_ASPECT] = "Forma de la imagen",
     [UI_MENU_ASPECT_DESC] = "Cuando la forma de la ventana difiere de la de la resolución del juego (una imagen 16:9 en una "
                             "pantalla 21:9): mantener la forma de la imagen con bandas negras, o estirarla por toda la ventana.",

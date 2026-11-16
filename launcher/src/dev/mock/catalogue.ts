@@ -14,6 +14,8 @@ const BRANDS = ["Nordo", "Kappa Line", "Velo", "Orbe", "Tamis", "Zenith"];
 const ABILITIES = [W("Vitesse", "Speed", "Velocidad", "スピード"), W("Défense", "Defence", "Defensa", "防御"), W("Économie", "Saver", "Ahorro", "節約"), W("Saut", "Jump", "Salto", "ジャンプ"), W("Recharge", "Recharge", "Recarga", "回復"), W("Ouverture", "Opener", "Apertura", "開幕"), W("Revanche", "Comeback", "Remontada", "逆転")];
 /** The made-up abilities a sub slot can hold: the first five (the last two are main-only, as in the real game some are). */
 export const MOCK_SUB_ABILITIES = ["a0", "a1", "a2", "a3", "a4"];
+/** The made-up abilities a main slot can hold: all seven. */
+export const MOCK_MAIN_ABILITIES = ["a0", "a1", "a2", "a3", "a4", "a5", "a6"];
 const KINDS = [W("Tir", "Shooter", "Tirador", "シューター"), W("Rouleau", "Roller", "Rodillo", "ローラー"), W("Précision", "Charger", "Precisión", "チャージャー"), W("Seau", "Slosher", "Cubo", "スロッシャー")];
 const SUBS = [W("Bombe", "Bomb", "Bomba", "ボム"), W("Balise", "Beacon", "Baliza", "ビーコン"), W("Mur", "Wall", "Muro", "ウォール"), W("Mine", "Mine", "Mina", "トラップ")];
 const SPECIALS = [W("Tornade", "Tornado", "Tornado", "トルネード"), W("Bouclier", "Shield", "Escudo", "シールド"), W("Vague", "Wave", "Ola", "ウェーブ"), W("Fusée", "Rocket", "Cohete", "ロケット")];

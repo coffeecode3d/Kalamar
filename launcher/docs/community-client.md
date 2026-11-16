@@ -158,7 +158,8 @@ the server's data as given, so a server can invent its own tournaments, leagues,
   engine as a save profile (`KLM_MATCH_LOADOUT`), the launch report says what was applied, the result's
   `loadout.ok` is shown. During a match, the Locker's profile (`KLM_SAVE_PROFILE`) also reaches only the copy. For
   each gear part the file names, it also carries the player's sub-abilities of the Locker (`gear_abilities`, three
-  names or `null`s) when the player chose some; what is reported to the server stays ids only.
+  names or `null`s) and main ability (`main_abilities`, a name) when the player chose them; what is reported to the
+  server stays ids only.
   An engine that reports `stage_list: "all"` offers every listed stage whatever the save: the whole list is declared.
   The reference server imposes no loadout; `proto_peer --loadout-rules` hands constraints to the runner to try it.
 - **Several relays and a changing offer (1.1.9).** `meta.changed` makes the backend read the meta again (after a

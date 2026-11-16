@@ -120,10 +120,11 @@ The patch comes from the public Switch patch set by theboy181 (switch-ptchtxt-mo
 11.3.0. Treat frame-rate patches as offline features: a server cannot see a client's render rate, but a modified game
 is outside what community servers promise.
 
-## Upscalers: FSR 4.1 / FSR 3.1 and DLSS
+## Upscalers: FSR 4.1 / FSR 3.1
 
-The `upscaler` row (Esc › Display, or `upscaler` in `kalamar.ini`) takes `fsr4`, `fsr3`, `fsr`, `dlss`, `dlaa` and
-`bilinear`. `fsr4` and `fsr3` hand the frame to AMD's FidelityFX runtime through the `ffx` API instead of the spatial
+The `upscaler` row (Esc › Display, or `upscaler` in `kalamar.ini`) takes `fsr4`, `fsr3`, `fsr` and `bilinear` —
+upstream dropped the `dlss`/`dlaa` choices in 0.3.5, because on this game they loaded NVIDIA's NGX but no frame was
+processed. `fsr4` and `fsr3` hand the frame to AMD's FidelityFX runtime through the `ffx` API instead of the spatial
 FSR 1 pass: the engine gives it the game's 1080p picture, the scene depth, per-pixel camera motion vectors and a
 Halton sub-pixel jitter, and gets back the window-sized picture. The vectors come from the game's own camera block
 (Splatoon 3's per-frame block in constant bank c3: view-projection at `+0x30`, near/far at `+0xe0`), reprojected
@@ -138,18 +139,18 @@ The runtime is **not bundled**. The engine loads it at run time from next to the
   Put it beside `splat3`, or point `KLM_FSR4=/path/to/amd_fidelityfx_upscaler_vk.so` at it (environment only: the
   path is a machine detail, not a setting). These builds mix GPL-3 code and extracted model weights, which is why the
   AppImage does not carry one; the engine only `dlopen`s what the user put there.
-- Without the file the log says so once and the present stays on FSR 1. The row stays selectable: the runtime is read
-  when the device is created, so adding the file needs a restart.
+- Without the file the log names the path it looked for once, and the present falls back to FSR 1 (picking 4.1 or 3.1
+  is never worse than FSR 1). The row stays selectable: the runtime is read at start, so adding the file needs a
+  restart.
 
 The provider needs `VK_EXT_descriptor_buffer`; the device enables it when the driver reports it. Measured on an RX 6900
 XT at 1080p → 1440p in the hub: 60.0 fps with a 53 fps 1% low, GPU at 44 %, no ghosting while walking or turning
 (per-object vectors for self-moving characters are the next quality step; FSR's own history handles them as camera
 motion today).
 
-`dlss` and `dlaa` are the NVIDIA path: DLSS's NGX runtime (`nvngx_dlss.dll` on Windows,
-`libnvidia-ngx-dlss.so.<version>` on Linux, from the NVIDIA RTX SDK, redistributable with its notices) replaces the
-present with a temporal upscale. On this target it is wired to the same scene inputs but has only been exercised on
-the upstream game's shaders; `fsr4` is the verified choice on Splatoon 3.
+The DLAA path (`dlaa = 1` in `kalamar.ini`, NVIDIA's NGX from `nvngx_dlss.dll` on Windows or
+`libnvidia-ngx-dlss.so.<version>` on Linux) is still in the engine but not offered in the row; on Splatoon 3 it loaded
+NGX without processing a frame, which is why upstream removed those choices.
 
 ## Status
 

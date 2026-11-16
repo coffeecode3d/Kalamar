@@ -65,7 +65,8 @@ static void fill(MouseGyro *g, const double w[3], double frame_s, double dt, Mot
     }
 }
 
-void mgyro_frame(MouseGyro *g, const MouseGyroCfg *c, double dx, double dy, double frame_s, double dt, MotionState *out) {
+void mgyro_frame(MouseGyro *g, const MouseGyroCfg *c, double dx, double dy, const MouseGyroFollow *follow,
+                 double frame_s, double dt, MotionState *out) {
     const double k = c->deg_per_count * M_PI / 180.0;
     double dyaw = -dx * k * c->scale_x;
     double dpitch = -dy * k * c->scale_y * (c->invert_y ? -1 : 1);
@@ -74,6 +75,17 @@ void mgyro_frame(MouseGyro *g, const MouseGyroCfg *c, double dx, double dy, doub
     double pitch = g->pitch + dpitch;
     if (pitch > lim) pitch = lim;
     if (pitch < -lim) pitch = -lim;
+    if (follow && follow->rate_deg > 0) {
+        double rate = follow->rate_deg * M_PI / 180.0, span = follow->span_deg * M_PI / 180.0;
+        double goal = pitch + follow->delta_deg * M_PI / 180.0;
+        if (goal > span) goal = span;
+        if (goal < -span) goal = -span;
+        double d = goal - pitch, next = pitch + (d > rate ? rate : d < -rate ? -rate : d);
+        if (next > lim) next = lim;
+        if (next < -lim) next = -lim;
+        g->followed += (next - pitch) * 180.0 / M_PI;
+        pitch = next;
+    }
     dpitch = pitch - g->pitch;
     if (g->upright != c->upright) g->upright = c->upright;
     double B0[3][3], mid[3][3], w[3];

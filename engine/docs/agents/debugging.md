@@ -3,7 +3,8 @@
 > **From the upstream project.** This page comes from totk-pc-recomp. Its method (the steps and the traps) holds for
 > any target; its bug classes and examples come from the upstream's *Tears of the Kingdom* port, and issue numbers
 > (#18) are the upstream's. Checked for Kalamar: the files, tests and settings it names exist; the
-> real-time frame step is a TotK patch set (Splatoon 3's patch table holds spin waits only). Not re-verified here: the
+> real-time frame step is a TotK patch set (Splatoon 3's patch tables hold spin waits and, for 11.3.0, the
+> `mouse_native` set only). Not re-verified here: the
 > examples, causes and measured costs.
 
 A game run costs minutes and a full rebuild costs several more, while reading code costs seconds. Order the work so the

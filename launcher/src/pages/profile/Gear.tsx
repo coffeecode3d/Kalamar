@@ -49,7 +49,7 @@ export function Gear({ cat, profile, setProfile, lang, t, notes, advanced, subs 
 
   return (
     <div className="tab-body">
-      {(["head", "clothes", "shoes", "gear", "sub_abilities", `sub_abilities.${slot}`] as const).map((k) => <FieldNote key={k} note={notes[k]} t={t} />)}
+      {(["head", "clothes", "shoes", "gear", "sub_abilities", `sub_abilities.${slot}`, "main_abilities", `main_abilities.${slot}`] as const).map((k) => <FieldNote key={k} note={notes[k]} t={t} />)}
       <FilterBar>
         <Segmented<Slot> value={slot} onChange={(v) => { setSlot(v); setBrand(""); setAbility(""); }} label={t("profile.tab.gear")}
           options={[{ id: "head", label: t("profile.gear.head") }, { id: "clothes", label: t("profile.gear.clothes") }, { id: "shoes", label: t("profile.gear.shoes") }]} />
@@ -73,7 +73,7 @@ export function Gear({ cat, profile, setProfile, lang, t, notes, advanced, subs 
         </span>
       </div>
       {chosenEntry && (
-        <SubAbilities part={slot} partLabel={t(`profile.gear.${slot}` as "profile.gear.head")} pieceName={nameOf(chosenEntry)} cat={cat} profile={profile} setProfile={setProfile} lang={lang} t={t} info={subs ?? null} onUpdate={() => go("play")} />
+        <SubAbilities part={slot} partLabel={t(`profile.gear.${slot}` as "profile.gear.head")} pieceName={nameOf(chosenEntry)} own={chosenEntry.ability} pieces={all} cat={cat} profile={profile} setProfile={setProfile} lang={lang} t={t} info={subs ?? null} onUpdate={() => go("play")} />
       )}
       <VirtualGrid
         className="vg-fill"

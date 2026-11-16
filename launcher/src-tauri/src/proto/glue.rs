@@ -132,6 +132,14 @@ impl GameHost for TauriHost {
         let p = crate::profile::load_profile(&st.data_dir);
         crate::profile::GEAR_PARTS.iter().filter_map(|part| p.sub_abilities.part(part).map(|s| (part.to_string(), s.clone()))).collect()
     }
+    fn current_main_abilities(&self) -> std::collections::HashMap<String, String> {
+        let st = self.0.state::<crate::commands::AppState>();
+        if !st.config.lock().unwrap_or_else(|p| p.into_inner()).apply_profile {
+            return Default::default();
+        }
+        let p = crate::profile::load_profile(&st.data_dir);
+        crate::profile::GEAR_PARTS.iter().filter_map(|part| p.main_abilities.part(part).map(|s| (part.to_string(), s.clone()))).collect()
+    }
 }
 
 impl TauriHost {

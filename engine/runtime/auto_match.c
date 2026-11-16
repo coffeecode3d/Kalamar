@@ -13,8 +13,9 @@
 //     member events (their names: SPLAT3_MATCH_RULES teams by name).
 // A step whose effect does not follow is retried until the step's time is up (SPLAT3_MATCH_TIMEOUTS). Measured flow
 // (docs/auto-match.md): host L, A (session list), Y, A (session created), then with every player in: Down, Down, A
-// (mode and stage ready), Right x1/x2 + Down per member (team Alpha/Bravo), A (teams ready), A (OK at the pre-match
-// screen); guest L, A (list), A, A (join), A (OK).
+// (mode and stage ready), on the team screen (the teams already in the save) Down per member and once more, A (teams
+// ready), A (OK at the pre-match screen); guest L, A (list), A, A (join), A (OK). On the room screen each press waits
+// for the screen's own state and is spaced in the game's frames (host_setup), so a slow machine takes the same steps.
 //
 // Out of sight: the window opens hidden (automatch_window_hidden), the sound is muted and the player's own input is not
 // read until the match is presented (SPLAT3_MATCH_REVEAL); a failed flow never shows the half-driven lobby: it writes
@@ -75,7 +76,7 @@ static const Splat3Addr *s3;        // set by automatch_init before any hook is 
 enum { HOST = 1, JOIN = 2 };
 enum { REVEAL_INTRO, REVEAL_LOADING, REVEAL_NEVER };
 static int round_no = 1;   // the round (SPLAT3_MATCH_CMD next): 1 for the first match
-static int role, players = 2, want_exit, play_s, reveal_mode = REVEAL_INTRO, error_show, diag;
+static int role, players = 2, want_exit, play_s, reveal_mode = REVEAL_INTRO, error_show, diag, bench_teams;
 static char match_id[65] = "none", result_path[512], status_path[512], shots_dir[512], host_name[64], teams[17],
             self_name[64];
 static uint64_t main_base, t0_ms;
@@ -460,11 +461,24 @@ void automatch_file(const char *path) {
 }
 
 // ---- presses and shots
+#define PRESS_TICKS 6   // a press holds its button this many ticks of game time (input.c: frames at 60 a second)
 static void press(const char *button) {
     char l[48];
-    snprintf(l, sizeof l, "%s 6", button);
+    snprintf(l, sizeof l, "%s %d", button, PRESS_TICKS);
     input_inject(l);
     rt_log("automatch: +%.1f s press %s", now_s(), button);
+}
+
+// A press, then the next step once `ticks` ticks of game time (frame_step_ticks: the frames the game stepped, one per
+// frame at 60 a second) have passed since it, and at least the hold and as long again: each press and the release
+// between two reach the game's menu at any frame rate. A gap in wall time only merges two presses into one held button
+// on a machine that shows the hold's frames in that time (12 frames a second for 500 ms), and on a slower one gives the
+// menu fewer frames between presses than it was measured with. At most 10 s.
+static void press_paced(const char *button, uint32_t ticks) {
+    if (ticks < 2 * PRESS_TICKS) ticks = 2 * PRESS_TICKS;
+    uint64_t t0 = frame_step_ticks(), end = plat_now_ms() + 10000;
+    press(button);
+    while (frame_step_ticks() < t0 + ticks + 1 && plat_now_ms() < end) plat_sleep_ms(5);
 }
 
 static void shot(const char *step) {
@@ -536,11 +550,17 @@ static uint64_t command_ms;      // when the last next command came (round 2 on)
 static volatile int32_t rules_on, n_commit, stage_check;   // stage_check: 1 in the room's list, -1 not
 static volatile int32_t n_room_frames;   // the room screen's updates (ROOM_SCREEN)
 static volatile uint64_t room_model;     // the room the screen commits to: +0xdc0 the 10 places' teams (u32)
-// The room screen (x0 of its commit) and its state at +0x14: it changes when the screen goes from the mode and stage to
-// the team screen and from there to the start (measured 4, 5, then another; after a match the values differ, so only a
-// change counts). The teams asked for per row (0 Alpha, 1 Bravo, -1 as the game has it), written into the save's at
-// the commit while teams_on: the team screen takes the save's teams when it opens.
+// The room screen (x0 of its commit) is a state machine (its update main+0x38f7ff0; on 11.3.0 the update main+0x38f8930
+// and the change of state main+0x390067c): +0x14 the state, +0xc the one before, +0x18 the frames spent in the state
+// (zeroed when the state changes, counted by each update). The host's states on the way to the match, measured on 11.3.0
+// (docs/auto-match.md, "Slow machines"): 4 the room (mode, stage, "ready"), 5 the check of the player list that "ready"
+// starts (a message, 115 to 125 of the screen's frames: 2.1 s at 60 frames a second, 3 to 4.5 s at 26 to 39), 7 the
+// team screen, 8 once its "Teams OK" is taken (the room's team array is set in that frame). The teams asked
+// for per row (0 Alpha, 1 Bravo, -1 as the game has it), written into the save's at the commit while teams_on: the team
+// screen takes the save's teams when it opens.
 #define UI_STATE 0x14ull
+#define UI_FRAMES 0x18ull
+#define UI_TEAM_SCREEN 7
 #define PRIV_TEAMS 0x42cull
 #define PLACE_SPECTATOR 3   // a place's value for a spectator (measured: Right on a row cycles 4 any, 0, 1, 3, 4)
 static volatile uint64_t room_ui;
@@ -592,13 +612,27 @@ static void room_commit(void) {
     BUMP(n_commit);
 }
 
+// The host's room screen state, as its update leaves it each frame (ROOM_SCREEN, x0 the screen; UI_STATE and UI_FRAMES
+// below): each change is logged with the frames the state before lasted, so a log shows which screen the presses met
+static int32_t ui_seen = -1;
+static uint32_t ui_seen_frames;
+static void room_screen_seen(void) {
+    Cpu *c = kern_cpu();
+    if (role != HOST || !LOAD(rules_on) || !c || !readable(c->x[0] + UI_STATE, 8)) return;
+    int32_t st = (int32_t)rd32(c->x[0] + UI_STATE);
+    uint32_t fr = rd32(c->x[0] + UI_FRAMES);
+    if (st != ui_seen && ui_seen >= 0)
+        rt_log("automatch: +%.2f s room screen state %d -> %d after %u frames", now_s(), ui_seen, st, ui_seen_frames);
+    ui_seen = st, ui_seen_frames = fr;
+}
+
 void automatch_fn_hit(uint64_t addr) {
     if (!s3) return;
     uint64_t o = addr - main_base;
     if (o == PIA_BROWSE_DONE) BUMP(n_browse_done);
     else if (o == NET_BROWSE) BUMP(n_browse_req);
     else if (o == ROOM_COMMIT) room_commit();
-    else if (o == ROOM_SCREEN) BUMP(n_room_frames);
+    else if (o == ROOM_SCREEN) BUMP(n_room_frames), room_screen_seen();
     else if (o == NET_VERSUS_OUT || o == NET_VERSUS_IN || o == NET_COMMON_OUT || o == NET_COMMON_IN ||
              o == NET_COMMON_IN_B) {
         Cpu *c = kern_cpu();
@@ -1417,11 +1451,57 @@ static int ui_state(void) {
     return ui && readable(ui + UI_STATE, 4) ? (int)rd32(ui + UI_STATE) : -1;
 }
 
-// "Ready" and the team screen. The teams asked for per row (the players in the order they came in) go into the save's
-// at the commit and are read back; the team screen opens on them. Each step is checked on the room screen's state: Down,
-// Down, A ("ready") until the state changes (a screen back after a match takes presses only after its entry: pressed
-// again 3 s later), then Down once per row (the cursor starts on the first) and A ("Teams OK") until it changes again;
-// every asked row's team is then checked in the room. 0 and why when a step does not happen.
+// The frames the room screen has spent in its current state (UI_FRAMES), -1 while the screen is unknown
+static int64_t ui_frames(void) {
+    uint64_t ui = LOAD(room_ui);
+    return ui && readable(ui + UI_FRAMES, 4) ? (int64_t)rd32(ui + UI_FRAMES) : -1;
+}
+
+// Waits until the room screen is in state st (-1: any) and has been for `frames` of its frames. 1 then; 0 after max_ms of
+// wall time (the frames are the bound on a machine that runs; the seconds only on one that hardly does), or as soon as
+// it has spent `away` frames in the state `other` (a step that went elsewhere; -2: none).
+static int ui_wait(int st, int64_t frames, int other, int64_t away, uint32_t max_ms) {
+    uint64_t end = plat_now_ms() + max_ms;
+    for (;;) {
+        int s = ui_state();
+        int64_t f = ui_frames();
+        if ((st < 0 || s == st) && f >= frames) return 1;
+        if (s == other && f >= away) return 0;
+        if (!before(end)) return 0;
+        sleep_ms(10);
+    }
+}
+
+// Waits until the room screen leaves state s, or has spent `frames` more of its frames in it (max_ms of wall time at
+// most). 1 when it left.
+static int ui_leaves(int s, int64_t frames, uint32_t max_ms) {
+    int64_t f0 = ui_frames();
+    uint64_t end = plat_now_ms() + max_ms;
+    while (ui_state() == s && ui_frames() < f0 + frames && before(end)) sleep_ms(10);
+    return ui_state() != s;
+}
+
+// "Ready" and the team screen. Each step is gated on the room screen's state machine (UI_STATE, UI_FRAMES) and its
+// presses are spaced in the game's frames (press_paced), never in seconds alone: the game's menus count frames, so a
+// machine that shows fewer of them a second takes the same steps, only later (docs/auto-match.md, "Slow machines").
+// - The teams asked for per row (the players in the order they came in) go into the save's at the commit and are read
+//   back; the team screen opens on them.
+// - "Ready": the room screen idle READY_IDLE frames (a screen back after a match ignores presses during its entry), then
+//   Down, Down, A until its state changes (again after RETRY_FRAMES, 3 times at most).
+// - "Ready" starts the game's check of the player list (a message, about 120 frames), then the team screen comes (its
+//   state UI_TEAM_SCREEN); the flow waits for that state and TEAMS_IDLE frames in it. It used to wait 3 s from the
+//   check's start instead, which the check outlasts on a host below about 40 frames a second (or with long frames in
+//   those seconds): the presses then met the message, the change from the check to the team screen was taken for
+//   "Teams OK", and the room's teams were still unset 3 s later (teams-not-set, every row -1 in the room).
+// - "Teams OK": Down once per row and once more (the cursor starts on the first row and stops on "Teams OK", the last
+//   item: measured, n + 1 presses confirm), then A, until the screen leaves the team screen (again after RETRY_FRAMES,
+//   3 times at most);
+// - every asked row's team is then checked in the room (set in the frame "Teams OK" is taken).
+// 0 and why when a step does not happen.
+#define READY_IDLE 60      // frames the room screen shows its state before "ready" is pressed
+#define TEAMS_IDLE 30      // frames the team screen shows before its first press
+#define RETRY_FRAMES 180   // frames without the step's effect before its presses are made again
+#define STEP_MAX_MS 60000  // wall-clock bound of each wait (a machine at 5 frames a second still counts 300 frames)
 static int in_session = 2;   // the host's room when it starts the match: players, or fewer when spectators did not come
 static int host_setup(char *why, size_t cap) {
     for (int r = 0; r < 10; r++) team_row[r] = -1;
@@ -1438,37 +1518,47 @@ static int host_setup(char *why, size_t cap) {
             plat_xchg32(&teams_on, 0);
             return snprintf(why, cap, "row %d: the save's team is %d, %d asked", r, save_team(r), team_row[r]), 0;
         }
+    if (!ui_wait(-1, READY_IDLE, -2, 0, STEP_MAX_MS)) {
+        plat_xchg32(&teams_on, 0);
+        return snprintf(why, cap, "the room screen did not settle (state %d, %lld frames in it)", ui_state(),
+                        (long long)ui_frames()), 0;
+    }
     int s0 = ui_state();
     for (int attempt = 0; attempt < 3 && ui_state() == s0; attempt++) {
-        if (attempt) sleep_ms(3000);
-        press("DOWN"), sleep_ms(800);
-        press("DOWN"), sleep_ms(800);   // "ready" under the mode and the stage
+        if (attempt) ui_leaves(s0, RETRY_FRAMES, STEP_MAX_MS);
+        if (ui_state() != s0) break;
+        press_paced("DOWN", 48);
+        press_paced("DOWN", 48);   // "ready" under the mode and the stage
         shot("room-ready");
         press("A");
-        end = plat_now_ms() + 3000;
-        while (ui_state() == s0 && before(end)) sleep_ms(100);
+        ui_leaves(s0, RETRY_FRAMES, STEP_MAX_MS);
     }
     if (ui_state() == s0) {
         plat_xchg32(&teams_on, 0);
-        return snprintf(why, cap, "the team screen did not open (room screen state %d)", s0), 0;
+        return snprintf(why, cap, "\"ready\" was not taken (room screen state %d)", s0), 0;
     }
-    sleep_ms(3000);   // the game first validates the player list (a message for 1-2 s), then the team screen
+    // the check of the player list, then the team screen; back on the room's state for 60 frames: the check refused
+    if (!ui_wait(UI_TEAM_SCREEN, TEAMS_IDLE, s0, 60, STEP_MAX_MS)) {
+        plat_xchg32(&teams_on, 0);
+        return snprintf(why, cap, "the team screen did not open (room screen state %d, %lld frames in it)", ui_state(),
+                        (long long)ui_frames()), 0;
+    }
     mark("teams screen");
     shot("teams");
     teams_log("on the team screen");
     room_dump("on the team screen");
-    int s1 = ui_state();
-    for (int attempt = 0; attempt < 3 && ui_state() == s1; attempt++) {
-        for (int r = 0; r < (attempt ? 1 : in_session); r++) press("DOWN"), sleep_ms(500);
+    int left = 0;
+    for (int attempt = 0; attempt < 3 && !left; attempt++) {
+        if (attempt) rt_log("automatch: +%.1f s \"Teams OK\" not taken after %d frames: again", now_s(), RETRY_FRAMES);
+        for (int r = 0; r <= in_session && r < 11; r++) press_paced("DOWN", 30);
         shot("teams-set");
         press("A");   // "Teams OK"
-        end = plat_now_ms() + 3000;
-        while (ui_state() == s1 && before(end)) sleep_ms(100);
+        left = ui_leaves(UI_TEAM_SCREEN, RETRY_FRAMES, STEP_MAX_MS);
     }
     plat_xchg32(&teams_on, 0);
-    if (ui_state() == s1) return snprintf(why, cap, "the team screen was not confirmed (state %d)", s1), 0;
+    if (!left) return snprintf(why, cap, "the team screen did not take \"Teams OK\" (room screen state %d)", ui_state()), 0;
     mark("teams confirmed");
-    end = plat_now_ms() + 3000;   // the room takes the teams a moment after the screen is left
+    end = plat_now_ms() + 3000;   // the room has the teams from the frame "Teams OK" is taken
     int bad = -1;
     do {
         bad = -1;
@@ -1478,7 +1568,9 @@ static int host_setup(char *why, size_t cap) {
     } while (bad >= 0 && before(end));
     teams_log("confirmed");
     room_dump("confirmed");
-    if (bad >= 0) return snprintf(why, cap, "row %d: team %d in the room, %d asked", bad, room_team(bad), team_row[bad]), 0;
+    if (bad >= 0)
+        return snprintf(why, cap, "row %d: team %d in the room, %d asked (room screen state %d)", bad, room_team(bad),
+                        team_row[bad], ui_state()), 0;
     return 1;
 }
 
@@ -2103,6 +2195,8 @@ static int setup(void) {
     return 1;
 }
 
+static void close_game(const char *why);
+
 // A round's room: host: the players in, the settings applied and checked, teams set, started; guest: the start.
 // 0 when the flow stopped.
 static int room_round(void) {
@@ -2173,6 +2267,10 @@ static int room_round(void) {
         char why[200];
         if (!host_setup(why, sizeof why)) {
             fail("teams-not-set", "%s", why);
+            return 0;
+        }
+        if (bench_teams) {   // a test aid: the lobby up to the teams, without the match
+            close_game("bench: stopped once the teams were set");
             return 0;
         }
         int r = to_stage(2500, until(T_START));
@@ -2617,6 +2715,9 @@ void automatch_init(void) {
     if (v) play_s = atoi(v) < 0 ? 0 : atoi(v) > 120 ? 120 : atoi(v);
     v = cfg_get("SPLAT3_MATCH_DIAG");
     diag = v && !strcmp(v, "1");
+    v = cfg_get("SPLAT3_MATCH_BENCH");
+    if (v && *v && strcmp(v, "teams")) { bad_settings("SPLAT3_MATCH_BENCH=%s unknown (teams)", v); return; }
+    bench_teams = v && !strcmp(v, "teams");
     v = cfg_get("SPLAT3_MATCH_SILENT");
     if (v && *v) {
         if (atoi(v) < 5 || atoi(v) > 600) { bad_settings("SPLAT3_MATCH_SILENT=%s out of range (5-600 s)", v); return; }

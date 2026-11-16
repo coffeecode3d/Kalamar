@@ -179,8 +179,9 @@ int list_match_options(void) {
                " \"match_loadout\": {\"setting\": \"SPLAT3_MATCH_LOADOUT\", \"format\": \"save_profile\", \"fields\": "
                "[\"weapon\", \"gear\"], \"player_save_written\": false, \"progress_kept\": false, \"checked_in_result\": true},\n"
                // What this engine can do beyond the fields above, by name: a launcher shows a feature only when it
-               // is listed. gear-abilities: a save profile's gear_abilities and chunks are applied (save-profile.md).
-               " \"capabilities\": [\"gear-abilities\"],\n"
+               // is listed. gear-abilities: a save profile's gear_abilities and chunks are applied; main-abilities:
+               // its main_abilities are (save-profile.md).
+               " \"capabilities\": [\"gear-abilities\", \"main-abilities\"],\n"
                " \"result\": {\"version\": 2, \"outcomes\": [\"completed\", \"aborted\", \"spectated\"], \"seat\": true}\n}\n");
     rsdb_close(t);
     free(sarc);

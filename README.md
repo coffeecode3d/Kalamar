@@ -83,9 +83,17 @@ What the launcher does about each, and the other remaining risks:
 
 ## Quick start
 
-**Players.** No release is published yet: build the launcher from source (below), start it, and let its install
-wizard ask for your three files (the game, its 11.3.0 update, your console's keys file) and build the game. Then
-press **Play**. Step by step: [docs/getting-started.md](docs/getting-started.md).
+**Players.** Download the launcher from the [releases page](https://github.com/CyriacFR/Kalamar/releases) (the
+portable `Kalamar.exe` or the installer), start it, and let its install wizard ask for your three files (the game, its
+11.3.0 update, your console's keys file) and build the game. Then press **Play**. Step by step:
+[docs/getting-started.md](docs/getting-started.md).
+
+**Building from source.** The launcher builds on Windows only: the prerequisites and the commands are in
+[CONTRIBUTING.md](CONTRIBUTING.md#building-and-testing-the-launcher) (`npm ci`, then `npm run tauri build` in
+`launcher/`). The engine is not built by hand for playing: the launcher's wizard builds the game from your files;
+building the engine yourself is described in [engine/docs/building.md](engine/docs/building.md). Linux: the engine's
+runtime builds and runs there ([engine/docs/building.md](engine/docs/building.md#linux-in-progress), in progress), but
+the launcher and its install wizard do not yet, so there are no Linux build steps for the whole project here.
 
 **Developers.** On Windows with Node.js 24, Rust (stable, MSVC) and Python 3:
 

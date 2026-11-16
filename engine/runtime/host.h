@@ -323,8 +323,8 @@ float res_dlss_lod_bias(void);                             // TOTK_DLSS upscalin
 int res_dlss_mode(const char *mode);                       // TOTK_DLSS changed while running: new scene size
 void res_fn_hit(uint64_t addr, uint64_t x0);               // main.c fnprof_hit: catches the renderer at start
 // g_fnprof (cpu.h): every lifted function calls fnprof_hit on entry while any of these bits is set (main.c)
-enum { FNPROF_RES = 1, FNPROF_SCENE = 2, FNPROF_TRACE = 4, FNPROF_AUTO = 8 };   // resolution.c, scene_start.c (start,
-                                                                              // trace), auto_match.c (session phase)
+enum { FNPROF_RES = 1, FNPROF_SCENE = 2, FNPROF_TRACE = 4, FNPROF_AUTO = 8,   // resolution.c, scene_start.c (start,
+       FNPROF_BENCH = 16 };   // trace), auto_match.c (session phase), mgyro_bench.c (the objects it watches)
 static inline void fnprof_on(int bit) { __atomic_or_fetch(&g_fnprof, bit, __ATOMIC_RELAXED); }
 static inline void fnprof_off(int bit) { __atomic_and_fetch(&g_fnprof, ~bit, __ATOMIC_RELAXED); }
 void res_present(Cpu *c);                                  // nvnQueuePresentTexture: applies a pending scene size

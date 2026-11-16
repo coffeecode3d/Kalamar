@@ -274,6 +274,9 @@ export const community: CommunityDict = {
   "f.presence.offline": "オフライン",
   "f.block": "ブロック",
   "f.block.confirm": "{name} をブロックしますか？フレンドではなくなり、相手はあなたを招待できなくなります。",
+  "f.blocked": "ブロック中のプレイヤー",
+  "f.blocked.lead": "相手はあなたを招待したり、フレンド申請を送ったりできません。ブロックを解除してもフレンドには戻りません。",
+  "f.unblock": "ブロック解除",
 
   "r.ladders": "ラダー",
   "r.none": "このサーバーにはラダーがありません。",

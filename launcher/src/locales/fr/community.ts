@@ -274,6 +274,9 @@ export const community: CommunityDict = {
   "f.presence.offline": "hors ligne",
   "f.block": "Bloquer",
   "f.block.confirm": "Bloquer {name} ? Vous ne serez plus amis et cette personne ne pourra plus vous inviter.",
+  "f.blocked": "Joueurs bloqués",
+  "f.blocked.lead": "Ils ne peuvent ni vous inviter ni vous envoyer de demande d'ami. Débloquer ne vous rend pas amis de nouveau.",
+  "f.unblock": "Débloquer",
 
   "r.ladders": "Échelles",
   "r.none": "Aucune échelle sur ce serveur.",
