@@ -41,20 +41,6 @@ site input_first main 4da1a60 f9405908 9451611c   # ldr x8, [x8, #0xb0] (the con
 site input_first main 2afafac 9400019d 94dbfbd1   # bl <the gyro processor's work> (main+0x2afaf6c)
 site input_first main 452a73c f9407508 94733df9   # ldr x8, [x8, #0xe8] (the framework's draw)
 
-# Patch sets: the runtime switches these (recomp/patches.py "set"; runtime/patches.c). fps60 is the frame-rate one.
-# 60: 1 by default, and the frame limit turns it off at 30 (runtime/frame_rate.c frame_limit_live), so the "fps_limit"
-# setting chooses between the game's 30 fps shipping mode and its 60 fps one on every screen.
-set fps60 KLM_FPS60 1
-
-# 60 fps on every screen, the hub and menus included, at normal speed [theboy181, switch-ptchtxt-mods; verified on
-# 11.3.0 in this fork: the hub runs at 60.0 fps with its animations at the console's speed]. The game sets a "30 fps"
-# bit in a settings word in two places; the replacement moves the word instead of OR-ing the bit in. The game's own
-# 60 fps path then runs with its matching time base.
-# Keep patches like this one to offline play: on a Switch they are not online-safe, and a server may see the timing
-# difference.
-site fps60 main 159810c 2a090149 2a0a03e9   # orr w9, w10, w9 -> mov w9, w10
-site fps60 main 3a54f04 2a090149 2a0a03e9   # orr w9, w10, w9 -> mov w9, w10
-
 # Spin waits, from tools/spin_waits.py --exefs <Splatoon 3 11.3.0 exefs> --modules main,sdk: loops that only another
 # thread can end; their back-edges pass rt_spin_gate (runtime/kernel.c), TOTK_SPIN=0 keeps the core. The main lines
 # are the 561 of 11.2.0 at their new places: tools/port_offsets.py --patches carries every line of the 11.2.0 table to
