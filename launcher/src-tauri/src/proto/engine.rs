@@ -24,6 +24,15 @@ pub const FORMAT: &str = "splat3-match-options";
 pub const MAX_OPTIONS_BYTES: usize = 48 * 1024;
 const MAX_OUTPUT: usize = 1 << 20;
 const LIST_TIMEOUT: Duration = Duration::from_secs(90);
+/// How long a listing that could not run or ran out of time is believed before the engine is asked again. Such a
+/// failure is not a fact about the executable: a slow or busy PC, or an antivirus scanning the new program, makes the
+/// first listing run out of time, and the same executable answers the next one. Kept for good, it left the player
+/// without stages to declare, so every queue with a stage pool refused them while the game itself ran. An engine that
+/// answered without a list (no such command) stays remembered as such.
+const FAILURE_RETRY: Duration = Duration::from_secs(600);
+/// How the note of such a failure starts ([`run_listing`]).
+const NOT_RUN: &str = "could not run";
+const NO_ANSWER: &str = "no answer within";
 /// The capability an engine names in the `capabilities` array of its list when its save profile applies the sub
 /// abilities of the equipped gear (`gear_abilities`) and the ability chunk stock (`chunks`).
 pub const CAP_GEAR_ABILITIES: &str = "gear-abilities";
@@ -129,7 +138,7 @@ pub fn run_listing(exe: &Path, cwd: &Path, lang: Option<&str>) -> Result<Value, 
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let mut child = cmd.spawn().map_err(|e| format!("{}: {e}", exe.display()))?;
+    let mut child = cmd.spawn().map_err(|e| format!("{NOT_RUN} {}: {e}", exe.display()))?;
     let mut out = child.stdout.take().ok_or("no output")?;
     let reader = std::thread::spawn(move || {
         use std::io::Read;
@@ -145,7 +154,7 @@ pub fn run_listing(exe: &Path, cwd: &Path, lang: Option<&str>) -> Result<Value, 
         if started.elapsed() > LIST_TIMEOUT {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(format!("no answer within {} s", LIST_TIMEOUT.as_secs()));
+            return Err(format!("{NO_ANSWER} {} s", LIST_TIMEOUT.as_secs()));
         }
         std::thread::sleep(Duration::from_millis(100));
     };
@@ -157,7 +166,14 @@ pub fn run_listing(exe: &Path, cwd: &Path, lang: Option<&str>) -> Result<Value, 
     parsed
 }
 
-/// The engine of `exe`: from the cache when the executable did not change, else listed now (and cached).
+/// Whether the cache file was written less than [`FAILURE_RETRY`] ago.
+fn cache_is_recent(data_dir: &Path) -> bool {
+    std::fs::metadata(cache_path(data_dir)).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < FAILURE_RETRY)
+}
+
+/// The engine of `exe`: from the cache when the executable did not change, else listed now (and cached). A cached
+/// failure to run the listing is only kept for [`FAILURE_RETRY`]; a list in another language is kept when the new
+/// listing fails.
 pub fn engine_info(data_dir: &Path, exe: &Path, cwd: &Path) -> EngineInfo {
     engine_info_in(data_dir, exe, cwd, None)
 }
@@ -169,11 +185,17 @@ pub fn engine_info_in(data_dir: &Path, exe: &Path, cwd: &Path, lang: Option<&str
         return EngineInfo { fingerprint: "unknown".into(), options: None, room_stages: None, note: Some("no game executable".into()), lang: None };
     };
     let cached = load_cache(data_dir).filter(|c| c.fingerprint == fp);
-    if let Some(c) = cached.as_ref().filter(|c| lang.is_none() || c.lang.as_deref() == lang || c.options.is_none()) {
+    let usable = |c: &&EngineInfo| match c.options {
+        Some(_) => lang.is_none() || c.lang.as_deref() == lang,
+        None => !c.note.as_deref().is_some_and(|n| n.starts_with(NOT_RUN) || n.starts_with(NO_ANSWER)) || cache_is_recent(data_dir),
+    };
+    if let Some(c) = cached.as_ref().filter(usable) {
         return c.clone();
     }
     let (options, note) = match run_listing(exe, cwd, lang) {
         Ok(v) => (Some(v), None),
+        // The list this executable gave in another language still says what it can run: kept, labels and all.
+        Err(_) if cached.as_ref().is_some_and(|c| c.options.is_some()) => return cached.unwrap_or_default(),
         Err(e) => (None, Some(e)),
     };
     let info = EngineInfo { fingerprint: fp, options, room_stages: cached.and_then(|c| c.room_stages), note, lang: lang.map(str::to_string) };
@@ -538,9 +560,9 @@ mod tests {
         assert!(engine_info_in(&d, &exe, &d, Some("EUfr")).options.is_some(), "same language: the cache");
         remember_room_stages(&d, &[json!(1), json!("x"), json!({"bad": 1})]);
         assert_eq!(load_cache(&d).unwrap().room_stages, Some(vec![json!(1), json!("x")]));
-        // another language: listed again (this executable cannot run: no list), the room list kept
+        // another language: listed again; this executable cannot run, so the list it gave before is kept, the room list too
         let i = engine_info_in(&d, &exe, &d, Some("USen"));
-        assert!(i.options.is_none() && i.room_stages.is_some());
+        assert!(i.options.is_some() && i.lang.as_deref() == Some("EUfr") && i.room_stages.is_some());
         assert_eq!(list_lang("fr"), "EUfr");
         assert_eq!(list_lang("en"), "USen");
         assert_eq!((list_lang("es"), list_lang("ja")), ("USes", "JPja"));
@@ -549,6 +571,18 @@ mod tests {
         let i = engine_info(&d, &exe, &d);
         assert!(i.options.is_none() && i.note.is_some());
         assert_ne!(i.fingerprint, fp);
+        // that failure is believed for a while (the note is the cached one), then the engine is asked again
+        let timed_out = format!("{NO_ANSWER} 90 s (cached)");
+        save_cache(&d, &EngineInfo { note: Some(timed_out.clone()), ..i.clone() });
+        assert_eq!(engine_info(&d, &exe, &d).note, Some(timed_out.clone()));
+        let old = std::time::SystemTime::now() - FAILURE_RETRY - Duration::from_secs(5);
+        let age = |d: &Path| std::fs::File::options().write(true).open(cache_path(d)).unwrap().set_modified(old).unwrap();
+        age(&d);
+        assert_ne!(engine_info(&d, &exe, &d).note, Some(timed_out));
+        // an engine that answered without a list is remembered as such, however old the answer
+        save_cache(&d, &EngineInfo { note: Some("the engine has no --list-match-options (exit code Some(1))".into()), ..i.clone() });
+        age(&d);
+        assert!(engine_info(&d, &exe, &d).note.unwrap().starts_with("the engine has no"));
         std::fs::remove_dir_all(&d).unwrap();
     }
 

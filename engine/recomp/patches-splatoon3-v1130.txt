@@ -1,6 +1,16 @@
 # Code patches for Splatoon 3 11.3.0 (recomp/patches.py, gen.py --target splatoon3-v1130): three patch sets and the spin
 # waits. 11.2.0 has the spin waits only (patches-splatoon3-v1120.txt).
 
+# 60 fps on every screen, the hub and menus included, at normal speed [theboy181, switch-ptchtxt-mods; verified on
+# 11.3.0: the hub runs at 60.0 fps with its animations at the console's speed]. The game sets a "30 fps" bit in a
+# settings word in two places; the replacement moves the word instead of OR-ing the bit in. The game's own 60 fps path
+# then runs with its matching time base, which is what runtime/frame_rate.c was written against (the limit of 30 turns
+# the set off). Keep patches like this one to offline play: on a Switch they are not online-safe, and a server may see
+# the timing difference.
+set fps60 KLM_FPS60 1
+site fps60 main 159810c 2a090149 2a0a03e9   # orr w9, w10, w9 -> mov w9, w10
+site fps60 main 3a54f04 2a090149 2a0a03e9   # orr w9, w10, w9 -> mov w9, w10
+
 # Native mouse aiming (runtime/mouse_native.c, TOTK_MOUSE_NATIVE): five sites of the player camera's update
 # (main+0x28f4e20) become a bl to a host function that does what the game does unless the mouse is the sensor: the yaw
 # damping (the frame's yaw turn times the damping gain) at patch page +0xf60 (main+0x61f9f60), the pitch follow (the

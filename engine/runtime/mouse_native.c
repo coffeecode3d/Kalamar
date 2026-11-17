@@ -172,7 +172,8 @@ static void pitch_share(Cpu *c) { set_sreg(c, 1, mouse_native_active() ? 1.0f : 
 // curve's result is as far from the view as the two have come apart, up to 42 degrees after a Y. Release 0.3.4 took
 // it in all those frames and also on any change of the curve's input over 30 degrees, a vertical flick of that much in
 // one frame or across a frame hitch: such a flick and its way back left the view 10 to 37 degrees up or down.)
-// Without a measured yaw gain yet, or with the setting off, the curve's result is handed out as it is.
+// Without a measured yaw gain yet, or with the setting off, the curve's result is handed out as it is; while the game
+// holds the camera's turns (a yaw gain of 0 once one was seen, as after a respawn), the pitch as it is.
 // A change of the camera itself (squid form and back, another camera blending in) changes the pose's view pitch of an
 // unchanged pitch. The game keeps its pitch through it, so the view a pitch gives comes back with the form. While the
 // pose moves at all, the aim starts again from the view drawn each frame and the game's own move of the view is left
@@ -228,6 +229,8 @@ static void pitch_share(Cpu *c) { set_sreg(c, 1, mouse_native_active() ? 1.0f : 
 #define WIDE_SPAN 40.0           // degrees from the level pitch's view to the top pitch's: at least, a wide camera
                                  // (human form: 67; squid form: 20)
 static volatile float yaw_gain;   // degrees of camera yaw per degree of controller yaw this frame; 0: not seen yet
+static volatile int32_t gain_seen;   // a gain above 0 was seen: a gain of 0 since is the game holding the camera's
+                                     // turns
 // The previous frame's pitch: camera, pitch handed out, curve input and bases; the view pitch aimed at (when aimed),
 // the view pitch drawn for the frame before, the pose's view pitch of that frame's pitch and of the pitch handed out;
 // how far the aim moved the pose since the curve's input last changed; followed_at_read as of the previous frame; the
@@ -269,6 +272,7 @@ static void yaw_gain_seen(Cpu *c) {
     float s8 = sreg(c, 8), scale;
     memcpy(&scale, (const void *)(uintptr_t)(c->sp + CAMERA_TURN_SCALE), sizeof scale);
     yaw_gain = s8 * scale * (5.0f / 9.0f);
+    if (yaw_gain > 0) gain_seen = 1;
     set_sreg(c, 12, s8 * sreg(c, 9));
 }
 
@@ -377,9 +381,11 @@ static void pitch_curve(Cpu *c) {
     uint64_t cam = c->x[19], excess_at = c->x[2];
     rt_call(c, ldr_module(0)->base + s3->pitch_curve, 3, c->x[0], c->x[1], c->x[2]);
     float game = sreg(c, 0), out = game;
-    int on = mouse_native_active() && yaw_gain > 0 && pose_out, keep = mgb_native_keep(1);
+    int native = mouse_native_active() && pose_out != NULL;
+    int on = native && yaw_gain > 0, keep = mgb_native_keep(1);
+    int held = native && !on && gain_seen && mgb_native_held(1);   // the game holds the camera's turns (below)
     dbg.game = game, dbg.resync = 1, dbg.gain = yaw_gain, dbg.flags = 0, dbg.latent = 0, dbg.calls++;
-    dbg.base1 = base1, dbg.base2 = base2, dbg.ctrl = (float)pitch_at_read;
+    dbg.base1 = base1, dbg.base2 = base2, dbg.ctrl = (float)pitch_at_read, dbg.input = input;
     if (on) {
         float now;
         memcpy(&now, (const void *)(uintptr_t)(cam + CAMERA_PITCH), sizeof now);
@@ -524,9 +530,33 @@ static void pitch_curve(Cpu *c) {
         if (mgb_on()) dbg.latent = (float)(view_pitch(c, cam, game) - pz.handed);
         pz.cam = cam, pz.out = out, pz.input = input, pz.base1 = base1, pz.base2 = base2, pz.valid = 1;
         pz.ctrl = pitch_at_read;
+    } else if (held) {
+        // The camera's turns are held: the game scales the frame's turn by 0, so the yaw does not turn, and the yaw's
+        // gain is 0 (measured: for 59 frames, about a second, when the player respawns, the game having set the new
+        // camera's pitch level just before). The pitch stays as the game has it, and what the mouse turns meanwhile is
+        // dropped, as for the yaw; the next frame with a gain starts the linear pitch again from there. Release 0.3.7
+        // handed out the curve's result in those frames: the game's map of the virtual controller's tilt, which follows
+        // the view at the yaw's gain and not the curve, so the view jumped by as far as the two had come apart and the
+        // next frame kept it there (measured on six respawns in a scripted match: after the landing the human form's
+        // view was 20 to 51 degrees below the level view the game had set, the mouse's own turns taken out).
+        memcpy(&out, (const void *)(uintptr_t)(cam + CAMERA_PITCH), sizeof out);
+        float zero = 0;
+        memcpy((void *)(uintptr_t)excess_at, &zero, sizeof zero);
+        static unsigned holds;
+        if (pz.valid && (holds < 16 || holds % 256 == 0))   // the hold's first frame, logged as the resyncs are
+            rt_log("mouse native: pitch kept while the game holds the camera's turns (the curve's result %+.1f degrees "
+                   "of view away)", view_pitch(c, cam, game) - view_pitch(c, cam, out));
+        if (pz.valid) holds++;
+        pz.valid = 0;
+        dbg.flags = MOUSE_NATIVE_HELD, dbg.now = out;
+        if (mgb_on()) dbg.seen = final_view_pitch(cam);
     } else {
         pz.valid = 0;
         dbg.flags = MOUSE_NATIVE_OFF;
+        if (mgb_on()) {   // the bench: the pitch and the view drawn, also while the curve's result is handed out
+            memcpy(&dbg.now, (const void *)(uintptr_t)(cam + CAMERA_PITCH), sizeof dbg.now);
+            dbg.seen = final_view_pitch(cam);
+        }
     }
     pz.followed = followed_at_read;
     dbg.out = out;

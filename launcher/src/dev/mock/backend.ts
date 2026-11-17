@@ -16,6 +16,8 @@
 //        opponent left (won), the player left (lost), 2 v 2: the other team's player left (team), a team-mate left
 //        (mate); the history (Standing tab) lists such matches too)
 //   &match=ask&ask=not-joined|too-many (the launcher asks before it starts the game for a match it did not join)
+//   &match=weapon (the window to change weapon before the launch: 20 s, then the game starts; "Ready" ends it sooner)
+//        &wsave=fail (every save of the profile is refused, as for an item the game data does not have)
 //   &iwarn=outside_profile,ram_low (warnings of a running install's checks)
 //   &relays=1 (1.1.9: several relays; the Account tab shows their measurement in every state, ending after 3 s)
 //   &stages=none (no game data: no stage pictures or names, the cards are neutral and the room form has its list)
@@ -39,6 +41,7 @@ import { markDialogDone } from "../../update/prompt";
 import { MOCK_MAIN_ABILITIES, MOCK_SUB_ABILITIES, STAGE_IDS, catalogue, stagesView } from "./catalogue";
 import { mockDraft, mockDraftAct, mockDraftMatch } from "./draft";
 import { META_STANDS, OLD_REFUSAL, ROOM_FIELDS, ROOM_STANDS, standsDraft, standsMatch, standsRoom, standsRunner, watchable } from "./stands";
+import { RANK_OF } from "./ranks";
 
 const q = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
 const S = {
@@ -80,6 +83,7 @@ const S = {
   // (`startfail=relay_capacity`: every relay full, 1.1.13)
   code: q.get("code"),
   startfail: q.get("startfail"),
+  wsave: q.get("wsave"),
 };
 
 /** The engine's sentence for an error code of the mock (`&code=`). */
@@ -171,7 +175,11 @@ function peek(): any[] {
     : { id: s.id, session: { logged_in: false, provider: null, user_id: null, display_name: null }, description: L("Petit serveur du nord : salons privés et soirées à thème le vendredi.", "A small server up north: private rooms and themed Friday nights.", "Un pequeño servidor del norte: salas privadas y noches temáticas los viernes.", "北の小さなサーバー：プライベートルームと金曜のテーマナイト。"), features: ["rooms", "friends", "activities", ...(S.pop ? ["population"] : [])] });
 }
 
-let presets: any[] = [];
+// `&match=weapon`: two presets to switch to from the window (the first is the profile's loadout); else none yet.
+let presets: any[] = S.match === "weapon" ? [
+  { name: "Roller", head: 4, clothes: 9, shoes: 2, weapon: 7, sub_abilities: { head: ["a0", "a2", "a2"], clothes: ["a1", null, null], shoes: null }, main_abilities: { head: "a5", clothes: null, shoes: null } },
+  { name: "Long range", head: 1, clothes: 3, shoes: 5, weapon: 10, sub_abilities: { head: null, clothes: null, shoes: null }, main_abilities: { head: null, clothes: null, shoes: null } },
+] : [];
 // ---- profile ------------------------------------------------------------------------------------------------------
 let profile: any = S.profile === "empty"
   ? { schema: 1, name: "", style: null, skin: null, eyes: null, hair: null, eyebrows: null, legwear: null, legwear_variation: null, head: null, clothes: null, shoes: null, weapon: null, banner: null, title: { adjective: null, subject: null }, badges: [null, null, null], sub_abilities: { head: null, clothes: null, shoes: null }, main_abilities: { head: null, clothes: null, shoes: null } }
@@ -323,8 +331,8 @@ const FEATURES = ["rooms", "queues", "parties", "friends", "presence", "ratings"
 const opponent = user("u-2", "Pablo");
 function participants(state: string | null): any[] {
   return [
-    { user: { id: "u-me", display_name: "Mira" }, member_name: "Mira", team: "alpha", role: "host", accept: "accepted", launched: true, status: state ? { state } : null, reported: false },
-    { user: opponent, member_name: "Pablo", team: "bravo", role: "join", accept: S.match === "found" ? "pending" : "accepted", launched: true, status: state === "waiting-for-players" ? null : state ? { state: state === "creating-room" ? "joining" : state } : null, reported: false },
+    { user: { id: "u-me", display_name: "Mira" }, member_name: "Mira", team: "alpha", role: "host", accept: "accepted", launched: true, status: state ? { state } : null, reported: false, rating: RANK_OF["u-me"] },
+    { user: opponent, member_name: "Pablo", team: "bravo", role: "join", accept: S.match === "found" ? "pending" : "accepted", launched: true, status: state === "waiting-for-players" ? null : state ? { state: state === "creating-room" ? "joining" : state } : null, reported: false, rating: RANK_OF["u-2"] },
   ];
 }
 // The draft of `&match=draft`, changed by the player's actions.
@@ -341,12 +349,38 @@ function liveMatch(): any {
   if (S.match === "ended") return null;
   if (S.match === "forfeit") return forfeitMatch();
   if (S.match === "ask") return { id: "m-1", state: "ready", rules: { teams: [1, 1], mode: "turf", rated: false, stage: "Vss_LanternHarbor" }, participants: participants("booting"), deadlines: {}, origin: { kind: "room", room_id: "r-other" } };
+  if (S.match === "weapon") return { id: "m-1", state: "ready", rules: { teams: [1, 1], mode: "turf", rated: true, stage: "Vss_LanternHarbor" }, participants: participants(null), you: { user_id: "u-me", member_name: "Mira", team: "alpha", role: "host" }, deadlines: { launch: new Date(weaponEnd() + 45_000).toISOString() }, origin: { kind: "queue", queue_id: "q-1v1" } };
   return { id: "m-1", state: "running", rules: { teams: [1, 1], mode: "turf", rated: true, stage: "Vss_LanternHarbor" }, participants: participants(S.match === "stop" ? "error" : S.gs), deadlines: {}, origin: { kind: "queue" } };
 }
 function runner(): any {
   return standsRunner(baseRunner(), S.match, S.spect);
 }
+/** `&match=weapon`: the window ends 20 s after the page first asked for the runner, then the game starts (pushed as
+ *  `proto-runner`, as the backend does); "Ready" (`proto_weapon_ready`) ends it at once. */
+let weaponAt: number | null = null;
+let weaponTimer: number | null = null;
+function weaponEnd(): number {
+  if (weaponAt === null) {
+    weaponAt = Date.now() + 20_000;
+    weaponTimer = window.setTimeout(weaponDone, 20_000);
+  }
+  return weaponAt;
+}
+function weaponDone() {
+  if (weaponTimer !== null) window.clearTimeout(weaponTimer);
+  weaponTimer = null;
+  if (S.match !== "weapon") return;
+  S.match = "run";
+  S.gs = "booting";
+  emit("proto-runner", { server: serversView().servers.find((x: any) => x.selected)?.id ?? "srv-1", ...runner() });
+}
 function baseRunner(): any {
+  if (S.match === "weapon") {
+    return {
+      match_id: "m-1", phase: "weapon", game_state: null, game: null, code: null, reason: null, relay_ip: null, role: "host", member_name: "Mira",
+      env: [], status_path: null, result_path: null, result_uploaded: false, contract: 2, keep_open: false, seat: "player", weapon_until: new Date(weaponEnd()).toISOString(),
+    };
+  }
   // The launcher's question before a launch it was not asked for (`proto/consent.rs`).
   if (S.match === "ask") {
     return {
@@ -393,9 +427,9 @@ function forfeitMatch(): any {
   const sacha = { id: "u-3", display_name: "Sacha" }, noa = { id: "u-4", display_name: "Noa" };
   const parts = team
     ? [
-        { user: { id: "u-me", display_name: "Mira" }, member_name: "Mira", team: "alpha", role: "host", accept: "accepted", launched: true, status: { state: "error" }, reported: true },
-        { user: sacha, member_name: "Sacha", team: "alpha", role: "join", accept: "accepted", launched: true, status: { state: "error" }, reported: true },
-        { user: opponent, member_name: "Pablo", team: "bravo", role: "join", accept: "accepted", launched: true, status: { state: "error" }, reported: true },
+        { user: { id: "u-me", display_name: "Mira" }, member_name: "Mira", team: "alpha", role: "host", accept: "accepted", launched: true, status: { state: "error" }, reported: true, rating: RANK_OF["u-me"] },
+        { user: sacha, member_name: "Sacha", team: "alpha", role: "join", accept: "accepted", launched: true, status: { state: "error" }, reported: true, rating: RANK_OF["u-3"] },
+        { user: opponent, member_name: "Pablo", team: "bravo", role: "join", accept: "accepted", launched: true, status: { state: "error" }, reported: true, rating: RANK_OF["u-2"] },
         { user: noa, member_name: "Noa", team: "bravo", role: "join", accept: "accepted", launched: true, status: { state: "error" }, reported: true },
       ]
     : participants("error").map((p) => ({ ...p, reported: true }));
@@ -658,7 +692,10 @@ export async function handle(cmd: string, args: any): Promise<any> {
       return { ...subs, ...main };
     }
     case "profile_load": return profile;
-    case "profile_save": profile = { ...args.profile }; return profile;
+    case "profile_save":
+      if (S.wsave === "fail") throw { ...fail("validation", "invalid profile"), fields: [{ key: "weapon", message: "not in the game data" }] };
+      profile = { ...args.profile };
+      return profile;
     // Loadout presets: kept in memory, with the same rules as the backend (trimmed unique names, at most 30).
     case "loadouts_list": return presets;
     case "loadouts_save": {
@@ -717,6 +754,7 @@ export async function handle(cmd: string, args: any): Promise<any> {
     case "proto_discover": return { kind: "service", preview: { name: "Open Ink", description: meta.description, api: "https://openink.example.org/api", api_host: "openink.example.org", typed_host: null, relay: "relay.openink.example.org:47313", operator_name: "Open Ink Association", operator_contact: null, region: "EU", languages: ["fr", "en"], rules_url: null, privacy_url: null, rules_summary: {}, features: FEATURES, features_mismatch: false, compat: { ok: true, reason: null, version: "1.1.3" }, insecure_loopback: false, providers: [] } };
     case "proto_set_background": case "proto_disconnect": case "proto_forget": case "proto_pick_loadout": case "proto_open_link": return null;
     case "proto_confirm_launch": S.match = args.start ? "run" : "ended"; return null;
+    case "proto_weapon_ready": setTimeout(weaponDone, 10); return null;
     case "match_create": return pmPlan();
     case "match_parse": return pmPlan();
     case "match_next_round": return pmPlan(1);

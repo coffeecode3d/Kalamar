@@ -90,10 +90,21 @@ impl Run {
         std::fs::create_dir_all(&self.lay.root).map_err(|e| Fail::io("install_dir", e))?;
         // Everything this run will add, at its peak (each step checks its own share again before it starts).
         self.check_space(StepId::Prereqs)?;
-        let ram = sys::total_ram().unwrap_or(0);
-        self.log(&format!("    memory: {:.1} GB, {} compile jobs", ram as f64 / (1u64 << 30) as f64, self.jobs));
+        // The requirement is on the memory fitted (an 8 GB PC whose integrated GPU reserves 1 GB shows 7 GB usable and
+        // must pass); the compile jobs follow the usable memory.
+        let usable = sys::total_ram().unwrap_or(0);
+        let ram = sys::nominal_ram().unwrap_or(0);
+        let gb = |b: u64| b as f64 / (1u64 << 30) as f64;
+        self.log(&format!("    memory: {:.1} GB fitted, {:.1} GB usable, {} compile jobs", gb(ram), gb(usable), self.jobs));
+        // Rounded down to a tenth, so the message never shows the 8 GB it asks for.
+        let shown = |b: u64| format!("{}", (gb(b) * 10.0).floor() / 10.0);
         if ram > 0 && ram < (8u64 << 30) - (256 << 20) {
-            return Err(Fail::new("ram").with("ram", format!("{:.0}", ram as f64 / (1u64 << 30) as f64)));
+            return Err(Fail::new("ram").with("ram", shown(ram)));
+        }
+        // Whatever is fitted, the compile needs room: a PC that leaves less than 5 GiB to Windows (a large share
+        // reserved for the integrated GPU, a memory cap, a virtual machine given less than its firmware says) is told so.
+        if usable > 0 && usable < (5u64 << 30) {
+            return Err(Fail::new("ram").with("ram", shown(usable)));
         }
         if ram > 0 && ram < (16u64 << 30) - (512 << 20) {
             warnings.push("ram_low".into());

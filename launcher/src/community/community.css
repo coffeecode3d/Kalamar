@@ -42,13 +42,23 @@
 .cm-who { display: inline-flex; align-items: center; gap: var(--sp-2); flex: 1 1 auto; min-width: 0; }
 .cm-avatar { flex: none; display: grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: var(--surface-3); font-weight: 800; font-family: var(--font-display); }
 .cm-me .cm-avatar { background: var(--mint); color: var(--mint-ink); }
-.cm-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; unicode-bidi: isolate; }
+.cm-name { min-width: 3ch; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; unicode-bidi: isolate; }
 /* A server's name, a player's title: their right-to-left letters never reorder the launcher's text around them. */
 .cm-utitle { unicode-bidi: isolate; }
 .cm-ask-facts { margin: 0; padding-left: 1.2em; }
 .cm-ask-facts li { unicode-bidi: isolate; overflow-wrap: anywhere; }
 .cm-crown { width: 1.1rem; height: 1.1rem; color: var(--amber); flex: none; }
 .cm-tag { font-size: var(--fs-xs); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* A player's rank beside their name: the badge keeps its size, the name gives way first. */
+.cm-rank { display: inline-flex; align-items: center; gap: var(--sp-2); flex: none; max-width: 100%; white-space: nowrap; font-size: var(--fs-sm); }
+.cm-rank-pos { font-weight: 800; font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+.cm-rank .cm-tier { font-size: var(--fs-xs); padding: 0.05rem 0.45rem; border-radius: 99px; background: rgba(255, 255, 255, 0.08); }
+.cm-rank-value { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.cm-rank-placement { color: var(--text-3); font-size: var(--fs-xs); font-style: italic; }
+.cm-found-teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: var(--sp-3); width: 100%; }
+.cm-found-teams h4 { margin: 0 0 var(--sp-1); font-size: var(--fs-sm); color: var(--text-2); }
+.cm-found-team .cm-row { flex-wrap: nowrap; }
 
 /* Teams */
 .cm-teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: var(--sp-4); }

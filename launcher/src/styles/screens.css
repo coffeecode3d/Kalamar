@@ -748,7 +748,8 @@ strong.t-alpha, strong.t-bravo, strong.t-charlie, strong.t-delta { color: var(--
 .st-player.bad { border-color: rgba(255, 96, 116, 0.5); border-left-color: var(--red); }
 .st-avatar { width: 2.6rem; height: 2.6rem; border-radius: 50%; background: var(--team); color: #0b0920; display: grid; place-items: center; font-weight: 900; font-size: 1.15rem; flex: none; }
 .st-player-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; flex: 1; }
-.st-player-name { font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-player-line { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.st-player-name { font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .st-you { color: var(--text-3); font-weight: 600; font-size: var(--fs-xs); }
 .st-player-step { font-size: var(--fs-sm); color: var(--text-2); }
 .st-team { color: var(--team); font-weight: 700; margin-right: 0.45em; }

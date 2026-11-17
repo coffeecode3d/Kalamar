@@ -32,7 +32,8 @@
 .dr-player { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: var(--sp-2); row-gap: 0.1rem; }
 .dr-player .st-avatar { width: 2rem; height: 2rem; font-size: 0.95rem; grid-row: span 2; }
 .dr-player.me .dr-player-name { color: var(--text); }
-.dr-player-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.dr-player-id { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.dr-player-name { flex: 0 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .dr-crown { width: 1.05rem; height: 1.05rem; color: var(--lemon); }
 .dr-vote { grid-column: 2 / 4; font-size: var(--fs-xs); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dr-team-state { margin: 0; min-height: 1.3em; font-size: var(--fs-sm); color: var(--text-2); display: flex; align-items: center; gap: 0.35em; }

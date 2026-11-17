@@ -10,7 +10,7 @@ import { keyLabel } from "../pages/settings/fields";
 import { toFail, type J } from "./api";
 import { applyMatch, has, myId, req, setLive, useLive } from "./store";
 import { failText, incompatibleText, useC, type CFn, type CKey } from "./texts";
-import { ErrorLine, Who, useModeName, vs } from "./ui";
+import { ErrorLine, RankBadge, Who, useModeName, vs } from "./ui";
 import { IconCheck } from "../icons";
 
 /** This player watches the match from the stands. */
@@ -80,7 +80,9 @@ export function RoomStands({ room, meta }: { room: J; meta: J }) {
       <ul className="cm-list st-seats">
         {seated.map((m: J) => (
           <li key={m.user?.id} className="cm-row">
-            <Who user={m.user} me={m.user?.id === me} crown={m.user?.id === room.owner} />
+            <Who user={m.user} me={m.user?.id === me} crown={m.user?.id === room.owner}>
+              <RankBadge rating={m.rating} />
+            </Who>
             <span className={`pill ${m.ready || m.user?.id === room.owner ? "pill-ok" : "pill-neutral"}`}>{m.ready || m.user?.id === room.owner ? c("room.ready") : c("room.notready")}</span>
           </li>
         ))}
@@ -120,7 +122,9 @@ export function MatchStands({ match }: { match: J }) {
         <ul className="cm-list">
           {list.map((s: J) => (
             <li key={s.user?.id ?? s.member_name} className="cm-row">
-              <Who user={{ display_name: s.member_name ?? s.user?.display_name }} me={s.user?.id === me} crown={s.role === "host"} />
+              <Who user={{ display_name: s.member_name ?? s.user?.display_name }} me={s.user?.id === me} crown={s.role === "host"}>
+                <RankBadge rating={s.rating} />
+              </Who>
               <span className="small muted grow">{s.left ? c("st.left") : state(s)}</span>
               {s.referee && <span className="pill pill-neutral">{c("st.referee")}</span>}
               {s.reported && <span className="pill pill-ok">{c("m.reported")}</span>}

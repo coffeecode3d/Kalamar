@@ -42,6 +42,7 @@ extern "C" {
 #include "brand.h"
 #include "cheats.h"
 #include "cfg.h"
+extern "C" float vk_framegen_shown_rate(int *factor);   // vk_framegen.c (vk.h)
 #include "fs.h"
 #include "input.h"
 #include "input_map.h"
@@ -666,20 +667,27 @@ static void row_fps_limit() {
     static const UiTextId ids[] = {UI_MENU_FPS_30, UI_MENU_FPS_40,  UI_MENU_FPS_45,  UI_MENU_FPS_60,
                                    UI_MENU_FPS_90, UI_MENU_FPS_120, UI_MENU_FPS_144, UI_MENU_FPS_DISPLAY};
     enum { NALL = sizeof vals / sizeof *vals };
-    // Without the real-time step (frame_rate.c: this game has no patch table) a limit above 60 gives 60: the ink layout
-    // offers 30 to 60 only.
-    const int N = ink::on ? 4 : NALL;
+    // Without the real-time step (frame_rate.c: this game has no patch table) the game stays at 60 and a limit above it
+    // is reached with generated pictures, a whole number per game frame (vk_framegen.c): the ink layout offers 30 to 60,
+    // 120 and the monitor's rate.
+    static const char *const ink_vals[] = {"30", "40", "45", "60", "120", "display"};
+    static const UiTextId ink_ids[] = {UI_MENU_FPS_30, UI_MENU_FPS_40, UI_MENU_FPS_45, UI_MENU_FPS_60, UI_MENU_FPS_120,
+                                       UI_MENU_FPS_DISPLAY};
+    const int N = ink::on ? (int)(sizeof ink_vals / sizeof *ink_vals) : NALL;
+    const char *const *use_vals = ink::on ? ink_vals : vals;
+    const UiTextId *use_ids = ink::on ? ink_ids : ids;
     const char *names[NALL];
-    for (int i = 0; i < NALL; i++) names[i] = menu_text(ids[i]);
+    for (int i = 0; i < N; i++) names[i] = menu_text(use_ids[i]);
     static char display[64];
     double hz = gfx_window_refresh_hz();
-    if (hz > 0 && N == NALL) {
+    if (hz > 0) {
         snprintf(display, sizeof display, menu_text(UI_MENU_FPS_DISPLAY_HZ), hz);
         names[N - 1] = display;
     }
     const char *set = cfg_get("TOTK_FPS_LIMIT"), *old = cfg_get("TOTK_FPS60");
     int cur = (!set || !*set) && old && !strcmp(old, "0") ? 0 : -1;
-    opt_choice_list("TOTK_FPS_LIMIT", UI_MENU_FPS_LIMIT, vals, names, N, UI_MENU_FPS_LIMIT_DESC, cur);
+    opt_choice_list("TOTK_FPS_LIMIT", UI_MENU_FPS_LIMIT, use_vals, names, N,
+                    ink::on ? UI_MENU_FPS_LIMIT_DESC_GEN : UI_MENU_FPS_LIMIT_DESC, cur);
 }
 
 // The menu's name of a TOTK_VK_PRESENT mode (gfx_window_present_mode); NULL for another.
@@ -2110,6 +2118,15 @@ static void perf_full_draw(const MenuTarget *t, float scale) {
         perf_cell(UI_MENU_OV_FMT_FPS, s.fps);
         perf_cell(UI_MENU_OV_LOW1, s.low1_fps);
         perf_cell(UI_MENU_OV_LOW01, s.low01_fps);
+        // with frame generation, the pictures on the screen per second (the row above counts the game's frames)
+        int factor = 0;
+        float shown = vk_framegen_shown_rate(&factor);
+        if (shown >= 0) {
+            perf_label(UI_MENU_OV_SHOWN_LABEL, fps_c);
+            perf_cell(UI_MENU_OV_FMT_FPS, shown);
+            perf_cell(UI_MENU_OV_FMT_FACTOR, (float)factor);
+            ImGui::TableNextColumn();
+        }
         perf_label(UI_MENU_OV_FRAME_LABEL, fps_c);
         perf_cell(UI_MENU_OV_FRAME_MS, s.frame_ms_avg);
         perf_cell(UI_MENU_OV_MAX_MS, s.frame_ms_max);

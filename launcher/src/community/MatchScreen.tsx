@@ -9,7 +9,7 @@ import { IconClose } from "../icons";
 import type { MatchRole } from "../api";
 import type { J, RunnerStatus } from "./api";
 import { myId, useLive } from "./store";
-import { stageFallback, useModeName, vs } from "./ui";
+import { RankBadge, stageFallback, useModeName, vs } from "./ui";
 import { StageTag, useStageInfo } from "../stages";
 import { PlayerCards, Ring, StageShell, clock, type StagePlayer, type StageStep } from "../match/StageLayout";
 import { useC, type CKey } from "./texts";
@@ -158,7 +158,7 @@ export function MatchScreen({ r, match, onReduce }: { r: RunnerStatus; match: J;
   );
 
   const watchers: J[] = Array.isArray(match?.spectators) ? match.spectators.filter((s: J) => !s.left).slice(0, 2) : [];
-  const players: StagePlayer[] = parts.map((p: J) => {
+  const players: StagePlayer[] = parts.map((p: J): StagePlayer => {
     const ps: string | undefined = p.status?.state;
     const pi = ps ? indexOf(roleOf(p.role), ps) : -1;
     const team = p.team === "alpha" || p.team === "bravo" ? p.team : null;
@@ -172,6 +172,7 @@ export function MatchScreen({ r, match, onReduce }: { r: RunnerStatus; match: J;
       progress: Math.max(0, pi),
       total: stepsFor(roleOf(p.role)).length,
       bad: ps === "error",
+      rank: <RankBadge rating={p.rating} />,
     };
   }).concat(watchers.map((s: J) => {
     // The stands: every spectator, shown to the players (nobody watches unseen).

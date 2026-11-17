@@ -1113,6 +1113,10 @@ static const char *gear_main_parse(const Json *J, const char *e, const MainSets 
         if (v < 0)
             return snprintf(why, cap, "main_abilities.%s: a main slot is never empty (null leaves the piece's own)",
                             gear_part_names[g]), why;
+        if (v == enum_value(e, "ExSkillDouble")) {   // FEST_ONLY_MAIN (below), left out, not refused: an earlier launcher may still send it
+            rt_log("save profile: main_abilities.%s: %s only exists during a Splatfest; left out", gear_part_names[g], "ExSkillDouble");
+            continue;
+        }
         if (sets && (v >= ABILITY_VALUES || !sets->on[g][v]))
             return snprintf(why, cap, "main_abilities.%s: ability %lld is not the main ability of any %s piece of the game",
                             gear_part_names[g], (long long)v, gear_part_names[g]), why;
@@ -1327,6 +1331,45 @@ static int apply_gear_abilities(const Json *J, Plain *p, Log *l) {
     return 1;
 }
 
+// The Splatfest-only main ability (Ability Doubler, the Splatfest Tee's own): in the game a player has it only while
+// a Splatfest runs, and there is none here, so no record keeps it. A piece that holds it gets the main ability of its
+// gear table row back, and the piece whose own it is gets the first ability of the enum (value 0). A profile cannot
+// name it (apply_main_abilities leaves it out of every part's set).
+#define FEST_ONLY_MAIN "ExSkillDouble"
+static int64_t fest_only_main(void) { return ability(FEST_ONLY_MAIN); }   // < 0: the game has no such ability
+static int64_t without_fest_only(int64_t skill) {
+    int64_t f = fest_only_main();
+    return f >= 0 && skill == f ? 0 : skill;
+}
+
+// Every owned piece (the ownership maps, after the profile's gear) that holds the Splatfest-only main ability.
+static int apply_fest_only(Plain *p, Log *l) {
+    int64_t f = fest_only_main();
+    if (f < 0) return 1;
+    for (size_t g = 0; g < sizeof gear_parts / sizeof *gear_parts; g++) {
+        const GearPart *gp = &gear_parts[g];
+        char q[96];
+        snprintf(q, sizeof q, "1/%s", gp->map);
+        Mp *map = path(p, q);
+        if (!map || map->kind != M_MAP) continue;
+        Table t;
+        int loaded = 0;
+        for (uint32_t k = 0; k < map->n; k++) {
+            Mp *s = mp_get(&map->kids[2 * k + 1], name_hash("MainSkill"));
+            if (!s || s->kind != M_INT || s->i != f || map->kids[2 * k].kind != M_INT) continue;
+            if (!loaded && !table_load(&t, gp->table)) return fail("an RSDB gear table is unreadable", (int64_t)g);
+            loaded = 1;
+            int64_t id = map->kids[2 * k].i, r = row_of(&t, id);
+            int64_t own = r < 0 ? 0 : without_fest_only(ability(row_str(&t, (uint32_t)r, "Skill")));
+            if (own < 0) own = 0;
+            note(l, " 1/%s[%lld]/MainSkill %lld->%lld (Splatfest only);", gp->map, (long long)id, (long long)f, (long long)own);
+            s->i = own;
+        }
+        if (loaded) free(t.b);
+    }
+    return 1;
+}
+
 // main_abilities: the main ability of the equipped pieces (the save's Coordinates, after the profile's gear), written
 // into the MainSkill of their records in the player data's ownership maps. The sets of each part are read from the gear
 // tables only when the profile names a main ability.
@@ -1341,7 +1384,7 @@ static int apply_main_abilities(const Json *J, Plain *p, Log *l) {
         if (!table_load(&t, gear_parts[g].table)) return fail("an RSDB gear table is unreadable", g);
         for (uint32_t k = 0; k < t.nrows; k++) {
             int64_t v = strcmp(row_str(&t, k, "HowToGet"), "Impossible") ? enum_value(e, row_str(&t, k, "Skill")) : -1;
-            if (v >= 0 && v < ABILITY_VALUES) sets.on[g][v] = 1;
+            if (v >= 0 && v < ABILITY_VALUES && v != fest_only_main()) sets.on[g][v] = 1;
         }
         free(t.b);
     }
@@ -1470,6 +1513,7 @@ static int apply(const Profile *pr, Plain *p, Log *l) {
                 free(t.b);
                 return fail("main ability names not found in main", gid);
             }
+            skill = without_fest_only(skill);   // a new record of the Splatfest Tee
             if (own(p, l, own_p, gid, REC_GEAR, rarity < 0 ? 0 : rarity > 2 ? 2 : rarity, skill, now) < 0 ||
                 own(p, l, seen_p, gid, REC_SEEN, 0, 0, now) < 0) {
                 free(t.b);
@@ -1484,7 +1528,8 @@ static int apply(const Profile *pr, Plain *p, Log *l) {
             set_int(p, l, eq, 0);
         }
     }
-    if (!apply_gear_abilities(J, p, l) || !apply_main_abilities(J, p, l) || !apply_chunks(J, p, l)) return 0;
+    if (!apply_gear_abilities(J, p, l) || !apply_fest_only(p, l) || !apply_main_abilities(J, p, l) || !apply_chunks(J, p, l))
+        return 0;
     // Win emote.
     int64_t e;
     int has_e = jint(J, "emote", &e);

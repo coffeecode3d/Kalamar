@@ -136,6 +136,7 @@
     [UI_MENU_FXAA_DESC] = "El suavizado de bordes FXAA propio del juego. Difumina un poco el detalle fino; con DLAA activado no hace falta.",
 
     [UI_MENU_FPS_LIMIT] = "Límite de fotogramas",
+    [UI_MENU_FPS_LIMIT_DESC_GEN] = "El máximo de imágenes por segundo en pantalla. El juego sigue a 60 fotogramas por segundo; por encima de 60 se muestran entre ellos imágenes creadas a partir de sus fotogramas (generación de fotogramas), lo que añade unos milisegundos de retraso.",
     [UI_MENU_FPS_LIMIT_DESC] = "El máximo de fotogramas por segundo que dibuja el juego. Por encima de 60 es experimental y "
                                "requiere que la velocidad del juego siga el reloj.",
     [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_40] = "40 FPS", [UI_MENU_FPS_45] = "45 FPS",
@@ -308,6 +309,7 @@
     [UI_KEY_RCTRL] = "Ctrl derecha", [UI_KEY_LALT] = "Alt", [UI_KEY_CAPSLOCK] = "Bloq Mayús", [UI_KEY_INSERT] = "Insert",
     [UI_KEY_DELETE] = "Supr", [UI_KEY_HOME] = "Inicio", [UI_KEY_END] = "Fin", [UI_KEY_PAGEUP] = "Re Pág",
     [UI_KEY_PAGEDOWN] = "Av Pág", [UI_KEY_NUM_FMT] = "Num %s",
+    [UI_KEY_WHEEL_UP] = "Rueda arriba", [UI_KEY_WHEEL_DOWN] = "Rueda abajo",
     [UI_PAD_SOUTH] = "Botón inferior", [UI_PAD_EAST] = "Botón derecho", [UI_PAD_WEST] = "Botón izquierdo",
     [UI_PAD_NORTH] = "Botón superior", [UI_PAD_LSTICK] = "Palanca izquierda", [UI_PAD_RSTICK] = "Palanca derecha",
     [UI_PAD_L] = "Botón superior izquierdo", [UI_PAD_R] = "Botón superior derecho", [UI_PAD_START] = "Inicio", [UI_PAD_BACK] = "Atrás",
@@ -440,6 +442,7 @@
     [UI_MENU_OV_FPS] = "%.0f FPS", [UI_MENU_OV_FRAME_MS] = "%.1f ms", [UI_MENU_OV_GAME_PCT] = "juego %.0f%%",
     [UI_MENU_OV_MAX_MS] = "máx. %.1f ms",
     [UI_MENU_OV_FPS_LABEL] = "FPS", [UI_MENU_OV_FRAME_LABEL] = "Fotograma", [UI_MENU_OV_FMT_FPS] = "%.0f",
+    [UI_MENU_OV_SHOWN_LABEL] = "Mostradas", [UI_MENU_OV_FMT_FACTOR] = "x%.0f",
     [UI_MENU_OV_LOW1] = "1%% bajo %.0f", [UI_MENU_OV_LOW01] = "0.1%% bajo %.0f",
     [UI_MENU_OV_GPU] = "GPU", [UI_MENU_OV_CPU] = "CPU", [UI_MENU_OV_RAM] = "RAM", [UI_MENU_OV_VRAM] = "VRAM",
     [UI_MENU_OV_TEMP] = "Temperatura", [UI_MENU_OV_POWER] = "Potencia", [UI_MENU_OV_CLOCK] = "Reloj",

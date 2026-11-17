@@ -149,10 +149,18 @@ static void frame_limit_live(void) {
     if (fps60_set == -2) fps60_set = rt_patch_set("fps60");
     if (fps60_set >= 0) rt_patch_switch(fps60_set, hz != 30);
     if ((hz > 60 || hz == 0) && !step_word)
-        rt_log("frame rate: limits above 60 need the real-time step (TOTK_REALTIME=1); 60 fps");
+        rt_log("frame rate: the game steps one tick a frame and stays at 60 fps; above 60 the pictures in between come "
+               "from frame generation (TOTK_FRAME_GEN=limit, vk_framegen.c)");
     else if (hz) rt_log("frame rate: limit %d fps", hz);
     else if (gfx_window_refresh_hz() > 0) rt_log("frame rate: limit at the monitor's refresh rate (%.3f Hz now)", gfx_window_refresh_hz());
     else rt_log("frame rate: limit at the monitor's refresh rate (60 until the window measures it)");
+}
+
+// The frame limit in frames a second, 0 for the monitor's refresh rate (frame generation takes its factor from it when
+// the game cannot go above 60 itself, vk_framegen.c).
+int frame_limit_hz(void) {
+    frame_limit_live();
+    return limit_hz < 0 ? 60 : limit_hz;
 }
 
 uint64_t frame_step_cap_ns(void) {

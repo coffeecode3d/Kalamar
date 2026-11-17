@@ -5,7 +5,9 @@ import { GameIcon, VirtualGrid } from "../../grid";
 import { entryName, namedName, normalise } from "../../gamedata";
 import { FieldNote, FilterBar, SearchBox, Select, sortEntries, type TabProps } from "./common";
 
-export function Weapon({ cat, profile, setProfile, lang, t, notes, advanced }: TabProps) {
+/** `keep`: the choice is never emptied (the window before a match's launch): a click on the chosen weapon keeps it,
+ *  and there is no "Clear" button. */
+export function Weapon({ cat, profile, setProfile, lang, t, notes, advanced, keep }: TabProps & { keep?: boolean }) {
   const [q, setQ] = useState("");
   const [klass, setKlass] = useState("");
   const [sub, setSub] = useState("");
@@ -52,7 +54,7 @@ export function Weapon({ cat, profile, setProfile, lang, t, notes, advanced }: T
       <div className="row between small muted">
         <span>{t("profile.count", { n: items.length, total: all.length })}</span>
         <span>
-          {chosenEntry ? <>{t("profile.selected")} <strong>{nameOf(chosenEntry)}</strong> <button className="btn btn-small btn-ghost" onClick={() => setProfile((p) => ({ ...p, weapon: null }))}>{t("profile.clear")}</button></> : t("profile.noselection")}
+          {chosenEntry ? <>{t("profile.selected")} <strong>{nameOf(chosenEntry)}</strong> {!keep && <button className="btn btn-small btn-ghost" onClick={() => setProfile((p) => ({ ...p, weapon: null }))}>{t("profile.clear")}</button>}</> : t("profile.noselection")}
         </span>
       </div>
       <VirtualGrid
@@ -63,7 +65,7 @@ export function Weapon({ cat, profile, setProfile, lang, t, notes, advanced }: T
         cellWidth={150}
         cellHeight={214}
         isSelected={(e) => e.id === chosen}
-        onPick={(e) => setProfile((p) => ({ ...p, weapon: p.weapon === e.id ? null : e.id }))}
+        onPick={(e) => setProfile((p) => ({ ...p, weapon: p.weapon === e.id && !keep ? null : e.id }))}
         empty={t("profile.empty")}
         render={(e) => (
           <>

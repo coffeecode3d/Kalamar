@@ -303,10 +303,33 @@
         "ja": "フレームレート上限"
       },
       "help": {
-        "fr": "Un entier de 30 à 240, ou « display » (fréquence de l'écran). Au-dessus de 60 : expérimental.",
-        "en": "A whole number from 30 to 240, or 'display' (monitor refresh rate). Above 60 is experimental.",
-        "es": "Un número entero de 30 a 240, o «display» (frecuencia de la pantalla). Por encima de 60 es experimental.",
-        "ja": "30～240の整数、または「display」（モニターのリフレッシュレート）。60を超える値は実験的です。"
+        "fr": "Un entier de 30 à 240, ou « display » (fréquence de l'écran). Le jeu reste à 60 images par seconde : au-dessus de 60, des images fabriquées à partir des siennes sont affichées entre deux (120 : 2 par image du jeu, 180 : 3, 240 : 4), avec quelques millisecondes de retard en plus. Expérimental.",
+        "en": "A whole number from 30 to 240, or 'display' (monitor refresh rate). The game stays at 60 frames a second: above 60, pictures made from its frames are shown in between (120: 2 per game frame, 180: 3, 240: 4), with a few milliseconds of added delay. Experimental.",
+        "es": "Un número entero de 30 a 240, o «display» (frecuencia de la pantalla). El juego sigue a 60 fotogramas por segundo: por encima de 60 se muestran entre ellos imágenes creadas a partir de sus fotogramas (120: 2 por fotograma del juego, 180: 3, 240: 4), con unos milisegundos más de retraso. Experimental.",
+        "ja": "30～240の整数、または「display」（モニターのリフレッシュレート）。ゲーム自体は毎秒60フレームのままで、60を超えるとゲームのフレームから作った画像を間に表示します（120：1フレームにつき2枚、180：3枚、240：4枚）。数ミリ秒の遅延が加わります。実験的な機能です。"
+      }
+    },
+    {
+      "key": "frame_gen_mode",
+      "section": "performance",
+      "ini_section": "frame rate",
+      "type": "enum",
+      "default": "interp",
+      "options": [
+        "interp",
+        "extrap"
+      ],
+      "label": {
+        "fr": "Images fabriquées au-dessus de 60",
+        "en": "Generated pictures above 60",
+        "es": "Imágenes generadas por encima de 60",
+        "ja": "60を超えるときの生成画像"
+      },
+      "help": {
+        "fr": "Sert quand la limite d'images dépasse 60. interp : images propres, mais chaque image du jeu est montrée un peu plus tard (jusqu'à 8 ms à 120, 13 ms à 300). extrap : aucun retard ajouté, mais des défauts visibles quand le mouvement change.",
+        "en": "Used when the frame-rate limit is above 60. interp: clean pictures, but each game frame is shown a little later (up to 8 ms at 120, 13 ms at 300). extrap: no added delay, but visible artefacts where the motion changes.",
+        "es": "Se usa cuando el límite de fotogramas supera 60. interp: imágenes limpias, pero cada fotograma del juego se muestra un poco más tarde (hasta 8 ms a 120, 13 ms a 300). extrap: sin retraso añadido, pero con defectos visibles cuando el movimiento cambia.",
+        "ja": "フレームレート上限が60を超えるときに使われます。interp：きれいな画像ですが、ゲームの各フレームが少し遅れて表示されます（120で最大8ミリ秒、300で最大13ミリ秒）。extrap：遅延は増えませんが、動きが変わる場面で乱れが見えます。"
       }
     },
     {
@@ -1270,7 +1293,9 @@
       "mouse_r",
       "mouse_m",
       "mouse_x1",
-      "mouse_x2"
+      "mouse_x2",
+      "wheel_up",
+      "wheel_down"
     ]
   }
 }

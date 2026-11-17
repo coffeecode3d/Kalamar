@@ -88,6 +88,7 @@ static void utf8(uint32_t c, char *out, size_t n) {
 static const char *key_label(int k, char *buf, size_t n) {
     if (k == KEY_NONE) return "";
     if (k >= KEY_SPACE && k <= KEY_PAGEDOWN) return menu_text((UiTextId)(UI_KEY_SPACE + (k - KEY_SPACE)));
+    if (k == KEY_WHEEL_UP || k == KEY_WHEEL_DOWN) return menu_text(k == KEY_WHEEL_UP ? UI_KEY_WHEEL_UP : UI_KEY_WHEEL_DOWN);
     if (k >= KEY_NUM0 && k <= KEY_NUM_DECIMAL) {
         static const char *const ops[] = {"+", "-", "*", "/", "."};
         char d[4];

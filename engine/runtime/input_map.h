@@ -32,6 +32,9 @@ enum {
     // the punctuation keys of a US keyboard, by position; the character on the key follows the keyboard layout
     KEY_MINUS, KEY_EQUALS, KEY_LBRACKET, KEY_RBRACKET, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_COMMA, KEY_PERIOD, KEY_SLASH,
     KEY_BACKSLASH, KEY_GRAVE,
+    // the scroll wheel, one notch away from the player and one towards them: not held like a key, each notch is a short
+    // press (input.c, wheel_key); no platform reports them as down
+    KEY_WHEEL_UP, KEY_WHEEL_DOWN,
     KEY_COUNT
 };
 

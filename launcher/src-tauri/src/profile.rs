@@ -194,11 +194,37 @@ pub fn part_main_abilities(cat: &Catalogue, part: &str) -> Option<std::collectio
     (!set.is_empty()).then_some(set)
 }
 
+/// `p` without what the Splatfest-only ability's withdrawal took away (`catalogue::FEST_ONLY_ABILITY`): that ability as
+/// a main ability, and a worn piece that carries it. A profile saved by an earlier launcher may hold either; they are
+/// dropped like the badges, so the rest of the profile still applies (the part then keeps the save's piece, whose
+/// record the engine corrects).
+pub fn without_fest_only(p: &Profile, cat: &Catalogue) -> Profile {
+    use crate::game::catalogue::FEST_ONLY_ABILITY;
+    let mut q = p.clone();
+    for part in GEAR_PARTS {
+        if q.main_abilities.part(part).is_some_and(|n| n.trim() == FEST_ONLY_ABILITY) {
+            q.main_abilities.set(part, None);
+        }
+    }
+    let fest = |part: &str, id: Option<i64>| id.is_some_and(|id| entry(cat, part, id).is_some_and(|e| e.unavailable.as_deref() == Some("fest_only")));
+    if fest("head", q.head) {
+        q.head = None;
+    }
+    if fest("clothes", q.clothes) {
+        q.clothes = None;
+    }
+    if fest("shoes", q.shoes) {
+        q.shoes = None;
+    }
+    q
+}
+
 /// Validates against the catalogue and returns the cleaned-up profile (current schema, trimmed name). `sub_capable`
 /// and `main_capable`: the abilities a sub slot and a main slot can hold (`game::subs`), when the install's keys file
 /// could be read; without them the names are only checked for shape. A main ability must also be one that a piece of
 /// that part has in the game ([`part_main_abilities`]), as the engine requires.
 pub fn validate_profile(p: &Profile, cat: &Catalogue, sub_capable: Option<&[String]>, main_capable: Option<&[String]>) -> AppResult<Profile> {
+    let p = &without_fest_only(p, cat);
     let mut errors = Vec::new();
     let name = match validate_name(&p.name) {
         Ok(n) => n,
@@ -465,6 +491,10 @@ pub fn to_runtime(p: &Profile, opts: ApplyOptions, save_exists: bool) -> Result<
     let mut mains = Map::new();
     for (part, piece) in [("head", p.head), ("clothes", p.clothes), ("shoes", p.shoes)] {
         let (Some(_), Some(name)) = (piece, p.main_abilities.part(part)) else { continue };
+        // A choice made before the Splatfest-only ability was withdrawn: left out, the engine gives the piece its own.
+        if name == crate::game::catalogue::FEST_ONLY_ABILITY {
+            continue;
+        }
         if !crate::game::subs::valid_name(name) {
             return Err(ConvertError::Invalid("main_abilities", format!("{part}: not an ability name")));
         }
@@ -1215,6 +1245,9 @@ save profile: deleted 2 older backups (the newest 10 are kept)";
         q.main_abilities.clothes = Some("Beta".into());
         let v = to_runtime(&q, ApplyOptions::default(), true).unwrap();
         assert_eq!((v["main_abilities"].clone(), v["gear_abilities"]["clothes"].clone()), (serde_json::json!({"clothes": "Beta"}), serde_json::json!([null, null, null])));
+        // the Splatfest-only ability, chosen with an older launcher: left out, the rest of the profile still applies
+        q.main_abilities.clothes = Some(crate::game::catalogue::FEST_ONLY_ABILITY.into());
+        assert!(to_runtime(&q, ApplyOptions::default(), true).unwrap().get("main_abilities").is_none());
         q.main_abilities.clothes = Some("bad name".into());
         assert!(matches!(to_runtime(&q, ApplyOptions::default(), true), Err(ConvertError::Invalid("main_abilities", _))));
     }
@@ -1239,6 +1272,13 @@ save profile: deleted 2 older backups (the newest 10 are kept)";
         assert!(validate_profile(&hidden, &cat, None, Some(&set)).is_err(), "only the selectable pieces count");
         let shape = Profile { main_abilities: MainAbilities { head: Some("a-b".into()), ..Default::default() }, ..ok.clone() };
         assert!(validate_profile(&shape, &cat, None, None).is_err());
+        // The Splatfest-only ability and the piece that carries it, kept from an earlier launcher: dropped, not refused.
+        let mut fest_cat = cat.clone();
+        fest_cat.categories.entry("clothes".into()).or_default().push(crate::game::catalogue::Entry { id: 26000, selectable: true, ability: Some(crate::game::catalogue::FEST_ONLY_ABILITY.into()), ..Default::default() });
+        crate::game::catalogue::apply_save_constraints(&mut fest_cat);
+        let old = Profile { clothes: Some(26000), main_abilities: MainAbilities { head: Some("HeadOnly".into()), clothes: Some(crate::game::catalogue::FEST_ONLY_ABILITY.into()), shoes: None }, ..ok.clone() };
+        let clean = validate_profile(&old, &fest_cat, None, Some(&set)).unwrap();
+        assert_eq!((clean.clothes, clean.main_abilities.clone()), (None, MainAbilities { head: Some("HeadOnly".into()), clothes: None, shoes: None }));
         // without the keys file the part's pieces still decide; without game data only the shape is checked
         assert!(validate_profile(&bad, &cat, None, None).is_err());
         assert!(validate_profile(&Profile { head: Some(1000), ..bad.clone() }, &cat_with_gear(), None, None).is_ok());

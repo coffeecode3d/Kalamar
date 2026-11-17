@@ -26,6 +26,9 @@ int mgb_native_ref(int def);
 // mouse_native.c: 1 when a frame that resyncs keeps the camera's pitch (all but the game's recentre) and a large turn
 // of the mouse is no resync: def, unless a bench test turns it off to compare with release 0.3.4.
 int mgb_native_hold(int def);
+// mouse_native.c: 1 when a frame in which the game holds the camera's turns (a yaw gain of 0, as after a respawn) keeps
+// the camera's pitch: def, unless a bench test turns it off to compare with release 0.3.7 (the curve's result then).
+int mgb_native_held(int def);
 // Motion thread (input.c mouse_gyro_tick): the samples about to be pushed, oldest first. The bench numbers and logs
 // them, and its field tests may change what they report.
 void mgb_samples(MotionState *s, int n, uint64_t now);

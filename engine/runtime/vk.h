@@ -155,6 +155,23 @@ void vk_fsr_release(void);   // before the device goes away
 // scales that one instead, crop {0, 0, w, h}); VK_NULL_HANDLE = nothing recorded. src is in GENERAL, fmt its format.
 VkImage vk_color_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, const int crop[4]);
 void vk_color_release(void);   // before the device goes away
+// Frame generation on the present (vk_framegen.c), present thread only. vk_framegen_factor: TOTK_FRAME_GEN, pictures
+// shown per game frame (1 = off, up to 16; display: from the monitor's refresh rate, for a 60 fps game);
+// vk_framegen_pictures: the same for a game period of period_ns; vk_framegen_extrapolates: TOTK_FRAME_GEN_MODE = extrap.
+// vk_framegen_ingest takes the game frame in place of its blit (src in GENERAL, its writes submitted): copies its crop
+// and finds the motion since the previous frame, and returns the frame's id; 0 = not taken (off, unavailable, too
+// small), the caller presents it the usual way. vk_framegen_present shows the picture at game time tau of frame id (0
+// the frame before it, 1 the frame itself, above 1 extrapolated); the last three frames taken can be shown.
+int vk_framegen_factor(void);
+int vk_framegen_pictures(uint64_t period_ns);
+int vk_framegen_extrapolates(void);
+void vk_framegen_hold(int on);    // 1: no generated pictures for now (the game misses its frame rate); any thread
+int vk_framegen_ingest(VkImage src, VkFormat fmt, int w, int h, const int crop[4]);
+void vk_framegen_present(int id, float tau);
+void vk_framegen_release(void);   // before the device goes away
+// Pictures shown per second over the last full second while frame generation runs, and *factor its pictures per game
+// frame; -1 when it is off or showed nothing for two seconds. Any thread (the performance overlay).
+float vk_framegen_shown_rate(int *factor);
 // HDR output (vk_hdr.c). vk_hdr_wanted: TOTK_HDR, read once. vk_hdr_surface_format: the HDR10 surface format when wanted
 // and offered (1). vk_hdr_set_active: gfx_present.c says whether the swapchain is HDR10 (vk_hdr_active). vk_hdr_encode:
 // like vk_color_record, src's crop as PQ code values (RGBA16F, crop {0, 0, w, h}). vk_hdr_ui_target / vk_hdr_ui_compose:
@@ -176,6 +193,9 @@ void vk_hdr_support(float out[4]);
 int vk_contact_strength(void);   // percent, 0 = off
 void vk_contact_release(void);   // before the device goes away
 void vk_present_flip(void);
+// A picture of frame generation (vk_framegen.c): an RGBA16F image of w x h in GENERAL, its writes submitted; presented
+// at once like vk_present_image, without FSR 4 / 3.1.
+void vk_present_generated(VkImage src, int w, int h);
 // Every submission to ctx->gfx_queue (and xfer_queue when shared) takes this lock; vk_present_image and the swapchain
 // rebuild do. Recursive.
 void vk_queue_lock(void);
@@ -186,6 +206,9 @@ void vk_queue_unlock(void);
 // TOTK_ASPECT); the rest is black.
 void gfx_fit_rect(int cw, int ch, int dw, int dh, int out[4]);
 void vk_present_capture(int on);
+// Capture is on (vk_present_capture): the present thread shows the next game frame itself, without frame generation, so
+// it is captured by the time the queued present is submitted (the backend's finish).
+int vk_present_capturing(void);
 int vk_present_captured(const uint8_t **px, int *w, int *h, VkFormat *fmt);
 
 // The window system's part of device creation (gfx_window_win.c with Win32, gfx_window_sdl.c with SDL): the instance

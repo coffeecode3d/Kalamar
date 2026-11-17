@@ -35,6 +35,26 @@
 # input and the screen. Each frame still reads the input once and runs its logic once; only their order changes. 0
 # keeps the game's order. Takes effect at once.
 # input_first = 1
+# Frame generation: limit (the default) follows fps_limit: in a game that cannot draw more than 60 frames a second
+# itself, a limit above 60 is reached with generated pictures (120: 2 per game frame, 180: 3, 240: 4, display: the
+# monitor's rate), and a limit of 60 or less means none. Or a fixed number of pictures per game frame, 1 (off) to 16,
+# or display: the monitor's refresh rate over the
+# game's frame rate, rounded down (5 on a 300 Hz monitor at 60 fps, 9 on 540 Hz, 2 on 144 Hz). The game keeps its own
+# frame rate and logic (60 fps in Splatoon 3, whose world steps one tick per frame); in between, the present shows
+# pictures made from the last two game frames and the motion found between them (frame_gen_hud below says what
+# happens to the HUD). More pictures than the monitor shows only cost GPU time: with limit, the number never exceeds
+# the monitor's rate over 60. While the game itself runs under 55 fps the pictures in between are held (5 s, then
+# longer if it happens again), so they never slow the game. Only the screen changes, never the
+# game's state, so online play is the same. While it is on, FSR 4 / 3.1 is left out (FSR 1 and the blit still scale).
+# Takes effect at once. Experimental.
+# frame_gen = limit
+# interp (smooth, shows each game frame up to one game period later: 13 ms at 60 fps with 5) or extrap (no added
+# delay: pictures pushed further along the latest motion, which overshoot for a moment where the motion changes).
+# frame_gen_mode = interp
+# 1 moves the scene as it was before the HUD, the reticle and the shot effects were drawn over it, and shows those
+# as the game drew them, sharp, at the game's frame rate; 0 moves the whole picture, HUD included, which then smears
+# where the scene behind it moves.
+# frame_gen_hud = 1
 # Real-time frame step: game speed follows the clock instead of the frame count.
 # realtime = 1
 # Cloth simulation on the real-time clock. Needs realtime = 1.
@@ -405,6 +425,7 @@
 #   key names: a-z 0-9 f2-f7 f9 f12 num0-num9 space tab enter backspace lshift rshift lctrl rctrl lalt capslock insert
 #   delete home end pageup pagedown up down left right num_add num_sub num_mul num_div num_decimal minus equals
 #   lbracket rbracket semicolon apostrophe comma period slash backslash grave mouse_l mouse_r mouse_m mouse_x1 mouse_x2
+#   wheel_up wheel_down (the scroll wheel: one short press per notch)
 # Defaults (pad_layout = nintendo): A = pad:east, key:E. B = pad:south, key:lshift. X = pad:north, key:space.
 # Y = pad:west, key:mouse_l. A pad that reports A/B and X/Y swapped (some GuliKit models): set pad_layout = xbox, or
 # swap them back here (keyboard keys stay):

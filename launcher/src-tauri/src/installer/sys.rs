@@ -218,6 +218,29 @@ pub fn total_ram() -> Option<u64> {
     None
 }
 
+/// Memory fitted in the PC according to its firmware, in bytes: what the PC is sold with. `total_ram` is lower by what
+/// the hardware reserves, mostly an integrated GPU (an "8 GB" laptop commonly shows 6.9 to 7.6 GiB).
+pub fn installed_ram() -> Option<u64> {
+    #[cfg(windows)]
+    {
+        let mut kb = 0u64;
+        // SAFETY: valid out pointer.
+        let ok = unsafe { windows_sys::Win32::System::SystemInformation::GetPhysicallyInstalledSystemMemory(&mut kb) };
+        if ok == 0 || kb == 0 { None } else { Some(kb.saturating_mul(1024)) }
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+/// The memory the requirements are compared with: the fitted memory, or the usable one when the firmware does not say
+/// (or says less).
+pub fn nominal_ram() -> Option<u64> {
+    match (installed_ram(), total_ram()) {
+        (Some(i), Some(t)) => Some(i.max(t)),
+        (i, t) => i.or(t),
+    }
+}
+
 /// Physical memory available now (free and standby), in bytes.
 pub fn available_ram() -> Option<u64> {
     #[cfg(windows)]
@@ -582,6 +605,7 @@ mod tests {
     #[test]
     fn machine_facts_are_readable() {
         assert!(total_ram().unwrap_or(1) > 0);
+        assert!(nominal_ram() >= total_ram());
         assert!(free_bytes(&std::env::temp_dir().join("does-not-exist-yet")).is_some() || !cfg!(windows));
         assert!(cpus() >= 1);
         assert!(physical_cores() >= 1 && physical_cores() <= cpus());

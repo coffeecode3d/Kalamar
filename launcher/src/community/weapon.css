@@ -1,0 +1,47 @@
+/* ==========================================================================================================
+   The window to change weapon before a match's launch (WeaponWindow.tsx): the match screen's frame, the
+   countdown and the weapon the game starts with on the side, the Locker's weapon grid beside them.
+   ========================================================================================================== */
+
+.wp { gap: var(--sp-4); }
+.wp .st-head { align-items: center; }
+.wp-sub { margin: var(--sp-2) 0 0; color: var(--text-2); max-width: 48rem; }
+
+.wp-cols { flex: 1 0 auto; display: grid; grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.wp-side { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.wp-main { min-width: 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-xl); background: var(--surface); border: 1px solid var(--line); backdrop-filter: blur(14px); }
+.wp-side .st-block { padding: var(--sp-3) var(--sp-4); gap: var(--sp-2); }
+
+/* ---- the countdown and the weapon the game starts with ---- */
+.wp-now {
+  display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4); border-radius: var(--r-xl);
+  background: linear-gradient(135deg, rgba(31, 242, 192, 0.16), rgba(27, 20, 62, 0.75) 62%); border: 1px solid rgba(31, 242, 192, 0.45); backdrop-filter: blur(14px);
+}
+.wp-now .ring-box { width: 6.5rem; }
+.wp-now .ring-value { font-size: 1.5rem; }
+.wp-current { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; flex: 1; }
+.wp-weapon { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.wp-weapon-icon { width: 56px; height: 56px; flex: none; }
+.wp-weapon-name { font-size: var(--fs-md); font-weight: 750; line-height: 1.2; overflow-wrap: anywhere; }
+
+/* ---- the presets ---- */
+.wp-presets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 13rem; overflow-y: auto; }
+.wp-preset {
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.wp-preset:hover { border-color: var(--mint); }
+.wp-preset:focus-visible { outline: none; box-shadow: var(--focus); }
+.wp-preset.on { border-color: var(--lemon); background: rgba(255, 226, 61, 0.12); }
+.wp-preset .preset-icon { width: 28px; height: 28px; }
+.wp-preset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.wp-preset-on { width: 1.1rem; height: 1.1rem; color: var(--lemon); flex: none; }
+
+/* ---- the weapon grid: as tall as the window allows ---- */
+.wp .vg-fill { height: calc(100vh - 21rem); min-height: 15rem; }
+
+@media (max-width: 900px) {
+  .wp-cols { grid-template-columns: 1fr; }
+  .wp-side .stc { max-width: 18rem; }
+  .wp .vg-fill { height: 60vh; }
+}

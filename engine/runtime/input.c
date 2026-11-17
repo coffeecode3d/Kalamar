@@ -458,7 +458,7 @@ static void walk_get(void) {
     const char *name = cfg_value("TOTK_WALK_KEY");   // "none" (the default) turns the key off
     int key = KEY_NONE;
     if (*name && !name_matches(name, "none")) {
-        for (int k = KEY_A; k < KEY_COUNT && key == KEY_NONE; k++)
+        for (int k = KEY_A; k < KEY_WHEEL_UP && key == KEY_NONE; k++)   // a held key: never the wheel's
             if (input_key_name(k) && name_matches(name, input_key_name(k))) key = k;
         if (key == KEY_NONE) rt_log("input: walk_key: unknown key '%s', the keyboard sticks keep their full tilt", name);
     }
@@ -702,6 +702,31 @@ static int32_t shake_stick(int held) {
     return (now - from) / SHAKE_SIDE_NS % 2 ? STICK_MAX : -STICK_MAX;
 }
 
+// The scroll wheel as the keys wheel_up and wheel_down (bound like any key: bind_b = wheel_up jumps on a notch): each
+// notch is a press of WHEEL_KEY_PULSE_NS, long enough for the game to read it at 30 fps, with WHEEL_KEY_GAP_NS released
+// after it, so two notches are two presses. A fast scroll's notches wait their turn (at most WHEEL_KEY_QUEUE), a turn
+// the other way drops them. Returns the key held this poll, KEY_NONE between presses and while not active (the cursor
+// free, or the map, where the wheel zooms). Under lock.
+#define WHEEL_KEY_PULSE_NS 50000000ull
+#define WHEEL_KEY_GAP_NS 34000000ull
+#define WHEEL_KEY_QUEUE 4
+static int wheel_key(int32_t notches, int active) {
+    static int32_t queued, dir;
+    static uint64_t until;   // the end of the press (dir != 0) or of the release after it
+    uint64_t now = plat_now_ns();
+    if (!active) { queued = dir = 0, until = 0; return KEY_NONE; }
+    if (notches) {
+        if (queued && (notches > 0) != (queued > 0)) queued = 0;
+        queued += notches;
+        queued = queued > WHEEL_KEY_QUEUE ? WHEEL_KEY_QUEUE : queued < -WHEEL_KEY_QUEUE ? -WHEEL_KEY_QUEUE : queued;
+    }
+    if (now >= until) {
+        if (dir) dir = 0, until = now + WHEEL_KEY_GAP_NS;
+        else if (queued) dir = queued > 0 ? 1 : -1, queued -= dir, until = now + WHEEL_KEY_PULSE_NS;
+    }
+    return dir > 0 ? KEY_WHEEL_UP : dir < 0 ? KEY_WHEEL_DOWN : KEY_NONE;
+}
+
 // The scroll wheel on the Purah Pad's map, which zooms with the right stick's y (up: in): each notch is a full-tilt
 // pulse of MAP_ZOOM_PULSE_NS on that stick with MAP_ZOOM_GAP_NS of neutral after it, so a step of the zoom and a
 // held zoom both see one notch as one push. A fast scroll's notches wait their turn (at most MAP_ZOOM_QUEUE), a turn the
@@ -812,6 +837,11 @@ static void poll_merged(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx
                 if (!counts || mouse_ignore[k]) down[k] = 0;
             }
             was_captured = cap;
+            // The wheel's notches: its two keys while the cursor is captured, the zoom on the map (below)
+            int map = menu_cursor_map();
+            int32_t notches = ikb_wheel_take();
+            int wheel = wheel_key(notches, cap && !map);
+            if (wheel != KEY_NONE) down[wheel] = 1, kbm_used = 1;
             b |= input_map_buttons(down);
             int32_t k[2];
             walk_get();
@@ -830,11 +860,10 @@ static void poll_merged(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx
             if (selector && menu_cursor_shortcut() == 0) selector = 0;
             mouse_camera(k, selector);
             // On the map the left stick moves the cursor and the right one zooms: the mouse moves the cursor there,
-            // the scroll wheel zooms (map_zoom_stick). Elsewhere the wheel is unbound; its notches are dropped.
-            int map = menu_cursor_map();
+            // the scroll wheel zooms (map_zoom_stick). Elsewhere its notches are the keys wheel_up and wheel_down.
             if (map) pick(&sl[0], &sl[1], k[0], k[1]);
             else pick(&sr[0], &sr[1], k[0], k[1]);
-            int32_t zoom = map_zoom_stick(ikb_wheel_take(), map);
+            int32_t zoom = map_zoom_stick(map ? notches : 0, map);
             if (zoom) pick(&sr[0], &sr[1], 0, zoom);
             int32_t shake = shake_stick(input_map_held(down, B_SHAKE));
             if (shake) sr[0] = shake, sr[1] = 0;
@@ -1121,7 +1150,7 @@ static void mouse_gyro_key_get(void) {
     const char *name = cfg_value("TOTK_MOUSE_GYRO_RECENTER_KEY");
     mg_key = KEY_NONE;
     if (*name && !name_matches(name, "none")) {
-        for (int k = KEY_A; k < KEY_COUNT && mg_key == KEY_NONE; k++)
+        for (int k = KEY_A; k < KEY_WHEEL_UP && mg_key == KEY_NONE; k++)   // a held key: never the wheel's
             if (input_key_name(k) && name_matches(name, input_key_name(k))) mg_key = k;
         if (mg_key == KEY_NONE) rt_log("input: mouse_gyro_recenter_key: unknown key '%s'", name);
     }

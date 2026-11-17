@@ -3,6 +3,7 @@
 // situation). Stage ids are the made-up ones of catalogue.ts; nothing here comes from a game.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { STAGE_IDS } from "./catalogue";
+import { RANK_OF } from "./ranks";
 
 const L = (fr: string, en: string, es: string, ja: string) => ({ fr, en, es, ja });
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -16,7 +17,7 @@ const SACHA = { id: "u-3", display_name: "Sacha" };
 const NOOR = { id: "u-4", display_name: "Noor" };
 
 function people(four: boolean): any[] {
-  const p = (u: any, team: string, role: string) => ({ user: u, member_name: u.display_name, team, role, accept: "accepted", launched: false, status: null, reported: false });
+  const p = (u: any, team: string, role: string) => ({ user: u, member_name: u.display_name, team, role, accept: "accepted", launched: false, status: null, reported: false, rating: RANK_OF[u.id] });
   return four ? [p(ME, "alpha", "host"), p(SACHA, "alpha", "join"), p(PABLO, "bravo", "join"), p(NOOR, "bravo", "join")] : [p(ME, "alpha", "host"), p(PABLO, "bravo", "join")];
 }
 

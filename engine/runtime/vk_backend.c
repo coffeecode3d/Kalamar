@@ -48,32 +48,153 @@ static void wait_until(uint64_t at) {
     while (kern_now_ns() < at) plat_yield();
 }
 
+// Takes the waiting present (pl held on entry and on return) and frees the game to go on: frame generation copies the
+// game image (vk_framegen_ingest, *gen its frame), else its blit is submitted and its host present left waiting
+// (*gen 0). Either way nothing shown later reads the game image, so busy ends here.
+static void take(PresentJob *j, int *gen) {
+    *j = job;
+    pending = 0;
+    busy = 1;
+    plat_cond_broadcast(&pcv);
+    plat_mutex_unlock(&pl);
+    if (flight_on) vk_thumbs_frame(j->frame);
+    // with capture on (a screenshot, a probe) the frame is presented and captured at once, without frame generation
+    *gen = vk_framegen_factor() > 1 && !vk_present_capturing()
+               ? vk_framegen_ingest(j->image, j->format, j->w, j->h, j->has_crop ? j->crop : NULL)
+               : 0;
+    if (!*gen) vk_present_blit(j->image, VK_IMAGE_LAYOUT_GENERAL, j->format, j->w, j->h, j->has_crop ? j->crop : NULL);
+    uint64_t f = vk_sync_submit(NULL, 0);   // a timeline value after the blit: deferred destruction waits for the blit too
+    if (j->value && f != j->value)
+        rt_fatal("vk: the present of frame %llu signalled %llu, queued as %llu", (unsigned long long)j->frame,
+                 (unsigned long long)f, (unsigned long long)j->value);
+    plat_mutex_lock(&pl);
+    busy = 0;
+    plat_cond_broadcast(&pcv);
+}
+
+// Frame generation: the game frame that came while the pictures of the previous one are still being shown, already
+// taken (present thread only). Taking it at once keeps the game from waiting on the present thread (vk_present_drain,
+// the next nvnQueuePresentTexture); vk_framegen.c keeps three frames, so the pictures in progress still have theirs.
+static PresentJob next;
+static int next_gen, have_next;
+
+static void poll_next(void) {
+    if (have_next || !__atomic_load_n(&pending, __ATOMIC_ACQUIRE) || vk_framegen_factor() < 2) return;
+    plat_mutex_lock(&pl);
+    if (pending) {
+        take(&next, &next_gen);
+        have_next = 1;
+    }
+    plat_mutex_unlock(&pl);
+}
+
+// wait_until for frame generation, taking the next game frame as soon as it comes
+static void wait_polling(uint64_t at) {
+    for (;;) {
+        poll_next();
+        uint64_t now = kern_now_ns();
+        if (now >= at) return;
+        if (at - now > 1500000) plat_wait_ns(500000);
+        else plat_yield();
+    }
+}
+
+// 1 when the next game frame is due by then: the pictures of this one stop there
+static int next_due(uint64_t t) { return have_next && next.at <= t; }
+
+// Frame generation (vk_framegen.c): the pictures of game frame id, k per game period. interp: the pictures between the
+// previous frame and this one from its display time on, then this frame itself, (k - 1) / k of a period late. extrap:
+// this frame at its display time, then pictures further along its motion until the next game frame. A picture already
+// later than one picture's period is skipped. Returns when this frame itself was shown.
+static uint64_t present_generated(int id, uint64_t at, uint64_t period, int k) {
+    if (k < 2) k = 1;   // switched off meanwhile: this frame alone
+    uint64_t step = period / (uint64_t)k;
+    if (!vk_framegen_extrapolates()) {
+        for (int i = 1; i < k; i++) {
+            uint64_t due = at + (uint64_t)(i - 1) * step;
+            if (next_due(due)) break;
+            wait_polling(due);
+            if (kern_now_ns() > due + step) continue;
+            vk_framegen_present(id, (float)i / (float)k);
+        }
+        uint64_t due = at + (uint64_t)(k - 1) * step;
+        if (!next_due(due)) wait_polling(due);
+        vk_framegen_present(id, 1.0f);
+        return kern_now_ns();
+    }
+    wait_polling(at);
+    vk_framegen_present(id, 1.0f);
+    uint64_t shown = kern_now_ns();
+    for (int i = 1; i < k; i++) {
+        uint64_t due = at + (uint64_t)i * step;
+        if (next_due(due)) break;
+        wait_polling(due);
+        if (kern_now_ns() > due + step) continue;
+        vk_framegen_present(id, 1.0f + (float)i / (float)k);
+    }
+    return shown;
+}
+
+// Frame generation must never cost game frames: the game steps one tick a frame, so a frame rate under 60 is slow
+// motion. queued is when the game presented this frame. While pictures are generated and the game's frame interval,
+// smoothed over about 16 frames with each interval counted as 33 ms at most (one long frame, a shader's first use, is
+// not a slow game), stays above 18 ms (under 55.5 fps), generation is held for 5 s, then tried again; each new hold
+// within 30 s of the last one's end doubles its length, up to 80 s. A game that is slow without generation stays held
+// until it is back at its rate. Present thread only.
+static void hold_generation(uint64_t queued) {
+    static uint64_t last, ema = 1000000000ull / 60, until, resumed, length = 5000000000ull;
+    static int held;
+    if (last && queued > last) {
+        uint64_t d = queued - last;
+        if (d > 33000000) d = 33000000;
+        ema = (ema * 15 + d) / 16;
+    }
+    last = queued;
+    int slow = ema > 18000000;
+    if (!held) {
+        if (!slow || vk_framegen_factor() < 2) return;
+        if (resumed && queued - resumed < 30000000000ull) length = length < 80000000000ull ? length * 2 : length;
+        else length = 5000000000ull;
+        held = 1, until = queued + length;
+        vk_framegen_hold(1);
+        rt_log("frame generation: held for %.0f s, the game was at %.1f fps with it", length / 1e9, 1e9 / (double)ema);
+    } else if (queued >= until && !slow) {
+        held = 0, resumed = queued;
+        ema = 1000000000ull / 60;
+        vk_framegen_hold(0);
+    }
+}
+
 static void present_main(void *arg) {
     (void)arg;
     perf_core_thread(PCORE_PRESENT);
-    uint64_t last = 0, last_queued = 0;
-    plat_mutex_lock(&pl);
+    uint64_t last = 0, last_queued = 0, last_at = 0, period = 1000000000ull / 60;
     for (;;) {
-        while (!pending) plat_cond_wait(&pcv, &pl);
-        PresentJob j = job;
-        pending = 0;
-        busy = 1;
-        plat_cond_broadcast(&pcv);
-        plat_mutex_unlock(&pl);
-        if (flight_on) vk_thumbs_frame(j.frame);
-        vk_present_blit(j.image, VK_IMAGE_LAYOUT_GENERAL, j.format, j.w, j.h, j.has_crop ? j.crop : NULL);
-        uint64_t f = vk_sync_submit(NULL, 0);   // a timeline value after the blit: deferred destruction waits for the blit too
-        if (j.value && f != j.value)
-            rt_fatal("vk: the present of frame %llu signalled %llu, queued as %llu", (unsigned long long)j.frame,
-                     (unsigned long long)f, (unsigned long long)j.value);
-        plat_mutex_lock(&pl);
-        busy = 0;
-        plat_cond_broadcast(&pcv);
-        plat_mutex_unlock(&pl);
-        uint64_t t0 = kern_now_ns();
-        wait_until(j.at);
-        uint64_t t1 = kern_now_ns();
-        vk_present_flip();
+        PresentJob j;
+        int gen;
+        if (have_next) {
+            j = next, gen = next_gen, have_next = 0;
+        } else {
+            plat_mutex_lock(&pl);
+            while (!pending) plat_cond_wait(&pcv, &pl);
+            take(&j, &gen);
+            plat_mutex_unlock(&pl);
+        }
+        // the game period from the display times the pacer gives, smoothed; a gap (a load) keeps the last one
+        if (last_at && j.at > last_at) {
+            uint64_t d = j.at - last_at;
+            if (d >= 4000000 && d <= 50000000) period = (period * 7 + d) / 8;
+        }
+        last_at = j.at;
+        hold_generation(j.queued);
+        uint64_t t0 = kern_now_ns(), t1;
+        if (gen) {
+            t1 = present_generated(gen, j.at, period, vk_framegen_pictures(period));
+        } else {
+            wait_until(j.at);
+            t1 = kern_now_ns();
+            vk_present_flip();
+        }
         mgb_flip(j.at, t1);   // TOTK_MGYRO_BENCH: when the frame went to the display
         // TOTK_TRACE=present: one line per present: the host present's interval, the interval of the game's present
         // calls (when the host present went out before back-edge pacing), the wait and how far past its target it went
@@ -85,7 +206,6 @@ static void present_main(void *arg) {
         last = t1;
         last_queued = j.queued;
         vk_pipeline_autosave();   // starts the autosave thread once
-        plat_mutex_lock(&pl);
     }
     return;
 }

@@ -35,6 +35,8 @@ enum {
     MOUSE_NATIVE_OFF = 1024,      // the curve's result handed out as it is: not the mouse, the setting off, no gain yet
     MOUSE_NATIVE_NARROW = 2048,   // a narrow camera (squid form): the turn moves the pitch along the wide camera's
                                   // table
+    MOUSE_NATIVE_HELD = 4096,     // the game holds the camera's turns (the yaw's gain is 0, as after a respawn): the
+                                  // pitch kept as the game has it
 };
 typedef struct {
     float game, out, view, want, target, gain, slope;
@@ -42,5 +44,6 @@ typedef struct {
     float now, step, seen, base1, base2, ctrl, latent;
     int flags;
     unsigned calls;   // the camera's calls of its pitch curve so far (one a frame of the player camera)
+    float input;      // the curve's input (degrees: the controller's tilt plus the stick's offset)
 } MouseNativePitch;
 MouseNativePitch mouse_native_pitch_debug(void);

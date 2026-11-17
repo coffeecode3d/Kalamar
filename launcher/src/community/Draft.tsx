@@ -12,7 +12,7 @@ import { Ring, clock } from "../match/StageLayout";
 import type { J } from "./api";
 import { applyMatch, myId, req, serverNow, useLive } from "./store";
 import { useC, type CFn, type CKey } from "./texts";
-import { ErrorLine, stageFallback, useAction, useModeName, useStageName } from "./ui";
+import { ErrorLine, RankBadge, stageFallback, useAction, useModeName, useStageName } from "./ui";
 import { acted as actedTeams, actingTeams, currentTurn, headline, idsOf, log, markOf, needed, selectable, toggle, turnClock, usable, type Headline, type Team } from "./draftState";
 import { isSpectator } from "./Stands";
 import "./draft.css";
@@ -67,7 +67,7 @@ function useTurnClock(d: J): { left: number; fraction: number } | null {
 
 /** One team: its players (the captain crowned, the player marked, their votes for the player's own team), whether it
  *  plays now, whether the server plays for it, and what it banned. */
-function TeamPanel({ team, d, names, me, stageName }: { team: Team; d: J; names: Record<string, string>; me: string | null; stageName: (id: string) => string }) {
+function TeamPanel({ team, d, names, ratings, me, stageName }: { team: Team; d: J; names: Record<string, string>; ratings: Record<string, J>; me: string | null; stageName: (id: string) => string }) {
   const { c } = useC();
   const t = d.teams?.[team] ?? {};
   const players: string[] = (Array.isArray(t.players) ? t.players : []).filter((x: unknown) => typeof x === "string").slice(0, 8);
@@ -86,7 +86,10 @@ function TeamPanel({ team, d, names, me, stageName }: { team: Team; d: J; names:
         {players.map((u) => (
           <li key={u} className={`dr-player ${u === me ? "me" : ""}`}>
             <span className="st-avatar" aria-hidden="true">{(names[u] ?? "?").slice(0, 1).toUpperCase()}</span>
-            <span className="dr-player-name">{names[u] ?? "?"}{u === me && <span className="st-you"> {c("m.screen.you")}</span>}</span>
+            <span className="dr-player-id">
+              <span className="dr-player-name">{names[u] ?? "?"}{u === me && <span className="st-you"> {c("m.screen.you")}</span>}</span>
+              <RankBadge rating={ratings[u]} />
+            </span>
             {t.captain === u && <IconCrown className="dr-crown" aria-label={c("d.captain")} />}
             {d.decider === "vote" && Array.isArray(t.votes) && (
               <span className="dr-vote">{votes[u] ? votes[u].map((id) => stageName(id)).join(", ") : c("d.vote.none")}</span>
@@ -161,7 +164,8 @@ export function DraftScreen({ match, onReduce }: { match: J; onReduce: () => voi
   const stageName = (id: string) => stageNameOf(id, meta) || id;
   const modeName = (id: string) => modeNameOf(id, meta) || id;
   const names: Record<string, string> = {};
-  for (const p of Array.isArray(match.participants) ? match.participants : []) if (p?.user?.id) names[p.user.id] = String(p.member_name ?? p.user.display_name ?? "?").slice(0, 32);
+  const ratings: Record<string, J> = {};
+  for (const p of Array.isArray(match.participants) ? match.participants : []) if (p?.user?.id) { names[p.user.id] = String(p.member_name ?? p.user.display_name ?? "?").slice(0, 32); ratings[p.user.id] = p.rating; }
   const h = headline(d);
   const turn = currentTurn(d);
   const n = needed(d);
@@ -252,7 +256,7 @@ export function DraftScreen({ match, onReduce }: { match: J; onReduce: () => voi
         </div>
       </header>
       <div className="dr-cols">
-        <TeamPanel team="alpha" d={d} names={names} me={me} stageName={stageName} />
+        <TeamPanel team="alpha" d={d} names={names} ratings={ratings} me={me} stageName={stageName} />
         <main className="dr-main">
           <section className={`dr-now ${h.kind === "you" ? "dr-now-you" : ""}`} aria-live="polite">
             {h.kind === "done" ? <Ring fraction={1} value="" tone="done" />
@@ -304,7 +308,7 @@ export function DraftScreen({ match, onReduce }: { match: J; onReduce: () => voi
             </section>
           )}
         </main>
-        <TeamPanel team="bravo" d={d} names={names} me={me} stageName={stageName} />
+        <TeamPanel team="bravo" d={d} names={names} ratings={ratings} me={me} stageName={stageName} />
       </div>
       <section className="dr-foot" aria-label={c("d.log")}>
         <h2 className="st-block-title">{c("d.log")}</h2>

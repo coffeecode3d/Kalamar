@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { pick, useI18n, type Key } from "../../i18n";
 import type { Schema, SchemaField } from "../../api";
 import { useApp } from "../../ctx";
-import { keyNameFromEvent, mouseNameFromEvent } from "../../keys";
+import { keyNameFromEvent, mouseNameFromEvent, wheelNameFromEvent } from "../../keys";
 
 export type Values = Record<string, string>;
 export type SetValue = (k: string, v: string | undefined) => void;
@@ -52,7 +52,7 @@ const KEY_ALIASES: Record<string, string> = {
   "mouse left": "mouse_l", "mouse right": "mouse_r", "mouse middle": "mouse_m", "left shift": "lshift", "right shift": "rshift", "left ctrl": "lctrl",
   "right ctrl": "rctrl", "left alt": "lalt", "left arrow": "left", "up arrow": "up", "right arrow": "right", "down arrow": "down", "caps lock": "capslock",
 };
-const NAMED_KEYS = ["space", "enter", "backspace", "tab", "lshift", "rshift", "lctrl", "rctrl", "lalt", "capslock", "mouse_l", "mouse_r", "mouse_m", "mouse_x1", "mouse_x2", "up", "down", "left", "right"];
+const NAMED_KEYS = ["space", "enter", "backspace", "tab", "lshift", "rshift", "lctrl", "rctrl", "lalt", "capslock", "mouse_l", "mouse_r", "mouse_m", "mouse_x1", "mouse_x2", "wheel_up", "wheel_down", "up", "down", "left", "right"];
 
 /** One key in the player's language: "Espace", "Clic gauche", "Q". */
 export function keyLabel(token: string, t: ReturnType<typeof useI18n>["t"]): string {
@@ -224,6 +224,7 @@ export function Bindings({ schema, values, errors, setValue }: { schema: Schema;
     const finish = () => {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("mousedown", onMouse, true);
+      window.removeEventListener("wheel", onWheel, true);
       stop.current = null;
       setCapturing(null);
     };
@@ -250,10 +251,19 @@ export function Bindings({ schema, values, errors, setValue }: { schema: Schema;
       add(mouseNameFromEvent(e));
       finish();
     }
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      const name = wheelNameFromEvent(e);
+      if (!name) return;   // a sideways scroll: keep waiting
+      add(name);
+      finish();
+    }
     // Listen from the next tick so the click that started the capture is not taken as the new binding.
     window.setTimeout(() => {
       window.addEventListener("keydown", onKey, true);
       window.addEventListener("mousedown", onMouse, true);
+      window.addEventListener("wheel", onWheel, { capture: true, passive: false });
     }, 0);
     stop.current = finish;
   };

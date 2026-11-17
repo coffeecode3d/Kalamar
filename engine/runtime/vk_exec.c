@@ -854,6 +854,7 @@ void vk_exec_pass_begin(VkExec *ex) {
     resolve_rt(ex);
     vk_contact_pass_begin(ex);
     vk_dlaa_pass(ex);   // DLAA runs before the bloom chain's first pass (vk_dlaa.c)
+    vk_framegen_pass(ex);   // the scene before the HUD (vk_framegen.c)
     // Learned targets (VkTexImage.fb_learned) are attached in the feedback layout
     VkImage want[9];
     VkImageAspectFlags wasp[9];

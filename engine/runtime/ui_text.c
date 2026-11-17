@@ -173,6 +173,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_FXAA_DESC] = "The game's own FXAA edge smoothing. It blurs fine detail a little; with DLAA on it is not needed.",
 
     [UI_MENU_FPS_LIMIT] = "Frame rate limit",
+    [UI_MENU_FPS_LIMIT_DESC_GEN] = "The most pictures per second on the screen. The game itself stays at 60 frames a second; above 60, pictures made from its frames are shown in between (frame generation), which adds a few milliseconds of delay.",
     [UI_MENU_FPS_LIMIT_DESC] = "The most frames per second the game draws. Above 60 is experimental and needs Game speed "
                                "follows the clock.",
     [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_40] = "40 FPS", [UI_MENU_FPS_45] = "45 FPS",
@@ -341,6 +342,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_KEY_RCTRL] = "Right Ctrl", [UI_KEY_LALT] = "Alt", [UI_KEY_CAPSLOCK] = "Caps Lock", [UI_KEY_INSERT] = "Insert",
     [UI_KEY_DELETE] = "Delete", [UI_KEY_HOME] = "Home", [UI_KEY_END] = "End", [UI_KEY_PAGEUP] = "Page Up",
     [UI_KEY_PAGEDOWN] = "Page Down", [UI_KEY_NUM_FMT] = "Num %s",
+    [UI_KEY_WHEEL_UP] = "Wheel up", [UI_KEY_WHEEL_DOWN] = "Wheel down",
     [UI_PAD_SOUTH] = "Bottom button", [UI_PAD_EAST] = "Right button", [UI_PAD_WEST] = "Left button",
     [UI_PAD_NORTH] = "Top button", [UI_PAD_LSTICK] = "Left stick", [UI_PAD_RSTICK] = "Right stick",
     [UI_PAD_L] = "Left bumper", [UI_PAD_R] = "Right bumper", [UI_PAD_START] = "Start", [UI_PAD_BACK] = "Back",
@@ -472,6 +474,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FPS] = "%.0f FPS", [UI_MENU_OV_FRAME_MS] = "%.1f ms", [UI_MENU_OV_GAME_PCT] = "game %.0f%%",
     [UI_MENU_OV_MAX_MS] = "max %.1f ms",
     [UI_MENU_OV_FPS_LABEL] = "FPS", [UI_MENU_OV_FRAME_LABEL] = "Frame", [UI_MENU_OV_FMT_FPS] = "%.0f",
+    [UI_MENU_OV_SHOWN_LABEL] = "Shown", [UI_MENU_OV_FMT_FACTOR] = "x%.0f",
     [UI_MENU_OV_LOW1] = "1%% low %.0f", [UI_MENU_OV_LOW01] = "0.1%% low %.0f",
     [UI_MENU_OV_GPU] = "GPU", [UI_MENU_OV_CPU] = "CPU", [UI_MENU_OV_RAM] = "RAM", [UI_MENU_OV_VRAM] = "VRAM",
     [UI_MENU_OV_TEMP] = "Temperature", [UI_MENU_OV_POWER] = "Power", [UI_MENU_OV_CLOCK] = "Clock",
@@ -659,6 +662,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_FXAA_DESC] = "Собственное сглаживание FXAA. Слегка размывает мелкие детали; с DLAA оно не нужно.",
 
     [UI_MENU_FPS_LIMIT] = "Ограничение частоты кадров",
+    [UI_MENU_FPS_LIMIT_DESC_GEN] = "Наибольшее число кадров в секунду на экране. Сама игра остаётся на 60 кадрах в секунду; выше 60 между её кадрами показываются промежуточные (генерация кадров), что добавляет несколько миллисекунд задержки.",
     [UI_MENU_FPS_LIMIT_DESC] = "Наибольшее число кадров в секунду. Выше 60 — экспериментальный режим, нужна «Скорость "
                                "игры по часам».",
     [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_40] = "40 FPS", [UI_MENU_FPS_45] = "45 FPS",
@@ -827,6 +831,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_KEY_RCTRL] = "Правый Ctrl", [UI_KEY_LALT] = "Alt", [UI_KEY_CAPSLOCK] = "Caps Lock", [UI_KEY_INSERT] = "Insert",
     [UI_KEY_DELETE] = "Delete", [UI_KEY_HOME] = "Home", [UI_KEY_END] = "End", [UI_KEY_PAGEUP] = "Page Up",
     [UI_KEY_PAGEDOWN] = "Page Down", [UI_KEY_NUM_FMT] = "Num %s",
+    [UI_KEY_WHEEL_UP] = "Колесо вверх", [UI_KEY_WHEEL_DOWN] = "Колесо вниз",
     [UI_PAD_SOUTH] = "Нижняя кнопка", [UI_PAD_EAST] = "Правая кнопка", [UI_PAD_WEST] = "Левая кнопка",
     [UI_PAD_NORTH] = "Верхняя кнопка", [UI_PAD_LSTICK] = "Левый стик", [UI_PAD_RSTICK] = "Правый стик",
     [UI_PAD_L] = "Левый бампер", [UI_PAD_R] = "Правый бампер", [UI_PAD_START] = "Start", [UI_PAD_BACK] = "Back",
@@ -961,6 +966,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FPS] = "%.0f FPS", [UI_MENU_OV_FRAME_MS] = "%.1f мс", [UI_MENU_OV_GAME_PCT] = "игра %.0f%%",
     [UI_MENU_OV_MAX_MS] = "макс. %.1f мс",
     [UI_MENU_OV_FPS_LABEL] = "FPS", [UI_MENU_OV_FRAME_LABEL] = "Кадр", [UI_MENU_OV_FMT_FPS] = "%.0f",
+    [UI_MENU_OV_SHOWN_LABEL] = "Показано", [UI_MENU_OV_FMT_FACTOR] = "x%.0f",
     [UI_MENU_OV_LOW1] = "1%% худших %.0f", [UI_MENU_OV_LOW01] = "0.1%% худших %.0f",
     [UI_MENU_OV_GPU] = "GPU", [UI_MENU_OV_CPU] = "ЦП", [UI_MENU_OV_RAM] = "ОЗУ", [UI_MENU_OV_VRAM] = "Видеопамять",
     [UI_MENU_OV_TEMP] = "Температура", [UI_MENU_OV_POWER] = "Мощность", [UI_MENU_OV_CLOCK] = "Частота",
@@ -1103,6 +1109,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_SHARPNESS_DESC] = "Aumento de nitidez após a ampliação do FSR; 0 desliga.",
 
     [UI_MENU_FPS_LIMIT] = "Limite de quadros",
+    [UI_MENU_FPS_LIMIT_DESC_GEN] = "O máximo de imagens por segundo na tela. O jogo continua a 60 quadros por segundo; acima de 60, imagens criadas a partir dos quadros do jogo são mostradas entre eles (geração de quadros), o que acrescenta alguns milissegundos de atraso.",
     [UI_MENU_FPS_LIMIT_DESC] = "O máximo de quadros por segundo que o jogo desenha. Acima de 60 é experimental e "
                                "precisa de Velocidade do jogo pelo relógio.",
     [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_40] = "40 FPS", [UI_MENU_FPS_45] = "45 FPS",
@@ -1209,6 +1216,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_KEY_RCTRL] = "Ctrl direito", [UI_KEY_LALT] = "Alt", [UI_KEY_CAPSLOCK] = "Caps Lock", [UI_KEY_INSERT] = "Insert",
     [UI_KEY_DELETE] = "Delete", [UI_KEY_HOME] = "Home", [UI_KEY_END] = "End", [UI_KEY_PAGEUP] = "Page Up",
     [UI_KEY_PAGEDOWN] = "Page Down", [UI_KEY_NUM_FMT] = "Num %s",
+    [UI_KEY_WHEEL_UP] = "Roda para cima", [UI_KEY_WHEEL_DOWN] = "Roda para baixo",
     [UI_PAD_SOUTH] = "Botão de baixo", [UI_PAD_EAST] = "Botão da direita", [UI_PAD_WEST] = "Botão da esquerda",
     [UI_PAD_NORTH] = "Botão de cima", [UI_PAD_LSTICK] = "Analógico esquerdo", [UI_PAD_RSTICK] = "Analógico direito",
     [UI_PAD_L] = "Bumper esquerdo", [UI_PAD_R] = "Bumper direito", [UI_PAD_START] = "Start", [UI_PAD_BACK] = "Back",
@@ -1347,6 +1355,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FPS] = "%.0f FPS", [UI_MENU_OV_FRAME_MS] = "%.1f ms", [UI_MENU_OV_GAME_PCT] = "jogo %.0f%%",
     [UI_MENU_OV_MAX_MS] = "máx. %.1f ms",
     [UI_MENU_OV_FPS_LABEL] = "FPS", [UI_MENU_OV_FRAME_LABEL] = "Quadro", [UI_MENU_OV_FMT_FPS] = "%.0f",
+    [UI_MENU_OV_SHOWN_LABEL] = "Exibidas", [UI_MENU_OV_FMT_FACTOR] = "x%.0f",
     [UI_MENU_OV_LOW1] = "1%% piores %.0f", [UI_MENU_OV_LOW01] = "0.1%% piores %.0f",
     [UI_MENU_OV_GPU] = "GPU", [UI_MENU_OV_CPU] = "CPU", [UI_MENU_OV_RAM] = "RAM", [UI_MENU_OV_VRAM] = "VRAM",
     [UI_MENU_OV_TEMP] = "Temperatura", [UI_MENU_OV_POWER] = "Consumo", [UI_MENU_OV_CLOCK] = "Frequência",
@@ -1657,6 +1666,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_GAMMA] = "伽马",
     [UI_MENU_COLOR_GAMMA_DESC] = "小于 1 提亮暗部与中间调，大于 1 压暗；1 表示不调整。",
     [UI_MENU_FPS_LIMIT] = "帧率上限",
+    [UI_MENU_FPS_LIMIT_DESC_GEN] = "屏幕每秒显示的最高画面数。游戏本身保持每秒 60 帧；高于 60 时，会在游戏帧之间显示由这些帧生成的画面（帧生成），这会增加几毫秒的延迟。",
     [UI_MENU_FPS_LIMIT_DESC] = "游戏每秒绘制的最高帧数。高于 60 帧为实验性功能，"
                                "需要开启“游戏速度跟随时钟”。",
     [UI_MENU_FPS_30] = "30 FPS",
@@ -1808,6 +1818,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_KEY_PAGEUP] = "Page Up",
     [UI_KEY_PAGEDOWN] = "Page Down",
     [UI_KEY_NUM_FMT] = "小键盘 %s",
+    [UI_KEY_WHEEL_UP] = "滚轮向上", [UI_KEY_WHEEL_DOWN] = "滚轮向下",
     [UI_PAD_SOUTH] = "下方按键",
     [UI_PAD_EAST] = "右侧按键",
     [UI_PAD_WEST] = "左侧按键",
@@ -1993,6 +2004,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_OV_GAME_PCT] = "游戏 %.0f%%",
     [UI_MENU_OV_MAX_MS] = "最长 %.1f ms",
     [UI_MENU_OV_FPS_LABEL] = "FPS", [UI_MENU_OV_FRAME_LABEL] = "帧时间", [UI_MENU_OV_FMT_FPS] = "%.0f",
+    [UI_MENU_OV_SHOWN_LABEL] = "显示", [UI_MENU_OV_FMT_FACTOR] = "x%.0f",
     [UI_MENU_OV_LOW1] = "1%% 低 %.0f", [UI_MENU_OV_LOW01] = "0.1%% 低 %.0f",
     [UI_MENU_OV_GPU] = "GPU",
     [UI_MENU_OV_CPU] = "CPU",

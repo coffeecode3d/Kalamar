@@ -26,3 +26,10 @@ export function keyNameFromEvent(e: KeyboardEvent): string | null {
 export function mouseNameFromEvent(e: MouseEvent): string | null {
   return ["mouse_l", "mouse_m", "mouse_r", "mouse_x1", "mouse_x2"][e.button] ?? null;
 }
+
+/** The scroll wheel as a key: a notch away from the player is `wheel_up`, towards them `wheel_down` (the runtime
+ *  presses the bound button once per notch). A sideways scroll is no key. */
+export function wheelNameFromEvent(e: WheelEvent): string | null {
+  if (e.deltaY === 0 || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return null;
+  return e.deltaY < 0 ? "wheel_up" : "wheel_down";
+}

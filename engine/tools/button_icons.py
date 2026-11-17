@@ -201,6 +201,7 @@ PC_LABELS = {
     'right': '→', 'num_add': '+', 'num_sub': '-', 'num_mul': '*', 'num_div': '/', 'num_decimal': '.',
     'minus': '-', 'equals': '=', 'lbracket': '[', 'rbracket': ']', 'semicolon': ';', 'apostrophe': "'", 'comma': ',',
     'period': '.', 'slash': '/', 'backslash': '\\', 'grave': '`', 'mouse_x1': 'M4', 'mouse_x2': 'M5',
+    'wheel_up': 'W↑', 'wheel_down': 'W↓',
 }
 # The one-letter panes around the action prompt (T_A_00 ...) are in the Normal font (Rodin B and Symbol): one character
 # of it per key.

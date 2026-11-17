@@ -24,6 +24,9 @@ int automatch_selftest(void);              // --probe-automatch: the rules parse
 // The window back ends (gfx_window_win.c, gfx_window_sdl.c): 1 when the window must open hidden (SPLAT3_MATCH: the
 // game stays out of sight until the match is presented). Asked once, when the window is made.
 int automatch_window_hidden(void);
+// 1 once the match's own music (the one with "Go!") has been opened in this round: the battle is on. For the mouse
+// gyro bench's tests of a match (mgyro_bench.c); 0 without SPLAT3_MATCH.
+int automatch_battle_on(void);
 // Implemented by the window back ends: show (1: shown, raised and focused as at a normal start, the fullscreen setting
 // applied) or hide (0: no window, no taskbar button) the game window. Any thread; no-op before the window exists.
 void gfx_window_show(int show);

@@ -537,6 +537,8 @@ void vk_present_capture(int on) {
     plat_rmutex_unlock(&g_pl);
 }
 
+int vk_present_capturing(void) { return __atomic_load_n(&g_capture, __ATOMIC_RELAXED); }
+
 int vk_present_captured(const uint8_t **px, int *w, int *h, VkFormat *fmt) {
     plat_rmutex_lock(&g_pl);
     int ok = g_cap_valid;
@@ -586,7 +588,10 @@ void gfx_fit_rect(int cw, int ch, int dw, int dh, int out[4]) {
     out[0] = (dw - out[2]) / 2, out[1] = (dh - out[3]) / 2;
 }
 
-static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w, int h, const int crop[4], int defer) {
+// gen: a picture of frame generation (vk_framegen.c), not the game's own frame: FSR 4 / 3.1 is left out, as its history
+// expects one picture per game frame with that frame's depth and camera.
+static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w, int h, const int crop[4], int defer,
+                          int gen) {
     int general = layout == VK_IMAGE_LAYOUT_GENERAL;
     gfx_window_start();
     VkCtx *c = vk_ctx();
@@ -670,7 +675,7 @@ static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w
     VkFormat pfmt = graded ? VK_FORMAT_R16G16B16A16_SFLOAT : fmt;
     const int *prect = graded ? grect : rect;
     // FSR 4.x/3.1 first (vk_fsr4.c, when its provider is loaded and the scene's depth and camera are known), then FSR 1
-    int fsr4 = general && vk_fsr4_record(cb, psrc, pfmt, graded ? cw : w, graded ? ch : h, prect, dst, to);
+    int fsr4 = general && !gen && vk_fsr4_record(cb, psrc, pfmt, graded ? cw : w, graded ? ch : h, prect, dst, to);
     // FSR (TOTK_UPSCALER) when the picture's rectangle is larger than the crop; else the bilinear blit
     int fsr = fsr4 || (general && vk_fsr_record(cb, slot, psrc, pfmt, graded ? cw : w, graded ? ch : h, prect, dst, to));
     g_scaler = fsr4 ? 3 : fsr ? 2 : cw != to[2] || ch != to[3];
@@ -770,11 +775,15 @@ out:
 }
 
 void vk_present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w, int h, const int crop[4]) {
-    present_image(src, layout, fmt, w, h, crop, 0);
+    present_image(src, layout, fmt, w, h, crop, 0, 0);
 }
 
 void vk_present_blit(VkImage src, VkImageLayout layout, VkFormat fmt, int w, int h, const int crop[4]) {
-    present_image(src, layout, fmt, w, h, crop, 1);
+    present_image(src, layout, fmt, w, h, crop, 1, 0);
+}
+
+void vk_present_generated(VkImage src, int w, int h) {
+    present_image(src, VK_IMAGE_LAYOUT_GENERAL, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, NULL, 0, 1);
 }
 
 void vk_present_flip(void) {
@@ -803,6 +812,7 @@ void gfx_window_release_vk(void) {
         menu_vk_release();
         vk_fsr_release();
         vk_color_release();
+        vk_framegen_release();
         vk_hdr_release();
         vk_contact_release();
         free_capture();

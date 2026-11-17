@@ -183,6 +183,10 @@ void vk_exec_pass_end(VkExec *ex);
 // Full memory barrier (all commands, all memory); ends the open pass first. Copies and dispatches order themselves with
 // it. Skipped when nothing was recorded since the last one.
 void vk_exec_barrier(VkExec *ex);
+// Frame generation (vk_framegen.c), on the replay's thread at each render pass begin: a copy of the scene before the
+// HUD is drawn over it, and the window texture that frame is copied into.
+void vk_framegen_pass(VkExec *ex);
+void vk_framegen_draw(VkExec *ex);   // vk_exec_draw.c prepare_draw, in the pass: may end and begin it again
 // UpdateUniformBuffer overlays (vk_exec_draw.c): the copies into the real buffers that updates inside a pass left for
 // the next barrier (barrier_to records them first), and a GPU write of another kind into [addr, addr+n) of this
 // submission (a copy, a fill, a storage write), which retires the overlays it touches.

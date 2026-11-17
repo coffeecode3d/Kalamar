@@ -1,0 +1,25 @@
+#version 450
+// Frame generation (runtime/vk_framegen.c): the quarter-size luma of a game frame averaged again by 4x4, a sixteenth
+// of the picture's size, where the coarse motion search runs. One texel of it is one cell of the motion field.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D src;
+layout(binding = 1, r16f) uniform writeonly image2D dst;
+layout(push_constant) uniform P {
+    ivec2 size;      // dst's size
+    ivec2 src_size;  // src's size
+} pc;
+
+void main() {
+    ivec2 q = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(q, pc.size))) return;
+    float sum = 0.0;
+    int n = 0;
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++) {
+            ivec2 p = q * 4 + ivec2(x, y);
+            if (any(greaterThanEqual(p, pc.src_size))) continue;
+            sum += texelFetch(src, p, 0).r;
+            n++;
+        }
+    imageStore(dst, q, vec4(sum / float(max(n, 1))));
+}

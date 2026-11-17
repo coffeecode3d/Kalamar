@@ -240,6 +240,15 @@ int probe_cfg(void) {
     dn[KEY_T] = 0, dn[KEY_MOUSE_L] = 1;
     CHECK(input_map_buttons(dn) == 1ull << B_Y, "bind: Y keeps the left mouse button");
     plat_setenv("TOTK_BIND_X", NULL);
+    // the two keys of the scroll wheel bind like any key (input.c presses them once per notch)
+    plat_setenv("TOTK_BIND_B", "key:wheel_up");
+    input_map_configure();
+    memset(dn, 0, sizeof dn);
+    dn[KEY_WHEEL_UP] = 1;
+    CHECK(input_map_buttons(dn) == 1ull << B_B, "bind: bind_B = key:wheel_up presses B on a notch up");
+    dn[KEY_WHEEL_UP] = 0, dn[KEY_WHEEL_DOWN] = 1;
+    CHECK(input_map_buttons(dn) == 0, "bind: the notch down is another key, unbound by default");
+    plat_setenv("TOTK_BIND_B", NULL);
     input_map_reset();
     memset(dn, 0, sizeof dn);
     dn[KEY_X] = dn[KEY_TAB] = dn[KEY_M] = dn[KEY_LCTRL] = dn[KEY_3] = 1;

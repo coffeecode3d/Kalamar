@@ -8,6 +8,7 @@ import { getLive, myId, serverNow } from "./store";
 import { ProtoIcon, safeColor } from "./icons";
 import { toFail, type Fail } from "./api";
 import { IconCrown } from "../icons";
+import { rankOf } from "./rank";
 
 export const KNOWN_TYPES = ["string", "integer", "boolean", "enum", "teams", "mode", "stage"];
 
@@ -221,6 +222,32 @@ export function Tier({ tier }: { tier: J }) {
     <span className="cm-tier">
       {color && <span className="cm-tier-dot" style={{ background: color }} aria-hidden="true" />}
       {L(tier.name) || tier.id}
+    </span>
+  );
+}
+
+/** A player's rank on one line beside their name (`participants[].rating`, protocol 1.1.14): the ladder position
+ *  ("#5"), the tier chip and the rating; "Placement" while the player is still being placed. Nothing when the server
+ *  sent no usable rating (older servers, malformed data). */
+export function RankBadge({ rating }: { rating: J }) {
+  const { c, L } = useC();
+  const r = rankOf(rating);
+  if (!r) return null;
+  if (r.placement) {
+    const label = r.remaining !== null ? c("r.placement.left", { n: r.remaining }) : c("r.placement");
+    return <span className="cm-rank cm-rank-placement" role="img" title={label} aria-label={label}><span aria-hidden="true">{c("r.placement")}</span></span>;
+  }
+  const parts = [
+    r.position !== null ? c("r.badge.pos", { pos: r.position }) : "",
+    r.tier ? String(L(r.tier.name) || r.tier.id) : "",
+    r.rating !== null ? c("r.badge.rating", { rating: r.rating }) : "",
+  ].filter((x) => x);
+  const label = parts.join(c("r.badge.sep"));
+  return (
+    <span className="cm-rank" role="img" title={label} aria-label={label}>
+      {r.positionText && <span className="cm-rank-pos" aria-hidden="true">{r.positionText}</span>}
+      {r.tier && <span aria-hidden="true"><Tier tier={r.tier} /></span>}
+      {r.rating !== null && <span className="cm-rank-value" aria-hidden="true">{r.rating}</span>}
     </span>
   );
 }

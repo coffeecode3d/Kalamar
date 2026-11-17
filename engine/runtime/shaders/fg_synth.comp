@@ -1,0 +1,88 @@
+#version 450
+// Frame generation (runtime/vk_framegen.c): one generated picture at game time tau, 0 being the earlier of the two
+// latest game frames (ha) and 1 the newer (hb). Between them it interpolates; above 1 it extrapolates from the newer
+// frame along the same motion.
+//
+// The motion field holds v = (position in ha) - (position in hb) per 16x16 cell. A point that moves along v is at
+// p + v * tau in ha and at p - v * (1 - tau) in hb when it is at p at time tau, for any tau. Every pixel tries six
+// vectors: none (the HUD and other still parts), the field filtered at the pixel, and the four nearest cells' own
+// vectors (edges of moving objects), and keeps the one whose two samples agree best over a small cross; a pixel that is
+// the same in both frames keeps still. Where even that one disagrees (something uncovered or hidden between the
+// frames), it takes the frame nearer in time instead of blending two different things.
+//
+// ha and hb are the scenes before the HUD when the game frames had them (vk_framegen_pass), so the HUD neither moves
+// nor stops the scene's motion: where the newer frame's picture (fb) differs from its scene, that is the HUD, which is
+// then taken from that picture as it is, sharp, at the game's frame rate. When either scene differs from its picture
+// in more pixels than a HUD covers (hud_pixels, counted by fg_ingest), the copy was not that frame's: the newer
+// picture is shown as it is.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D ha;
+layout(binding = 1) uniform sampler2D hb;
+layout(binding = 2) uniform sampler2D flow;
+layout(binding = 3, rgba16f) uniform writeonly image2D dst;
+layout(binding = 4) uniform sampler2D fb;   // the newer frame's picture, HUD included
+layout(std430, binding = 5) readonly buffer Stats { uint hud_pixels[]; };
+layout(push_constant) uniform P {
+    ivec2 size;        // the picture's size
+    ivec2 grid;        // cells of the motion field
+    float tau;
+    float occlusion;   // mean luma difference above which the two frames disagree
+    float hud;         // 1: ha and hb are scenes without the HUD, which comes from fb
+    uint limit;        // pixels a picture may differ from its scene in
+    int slot_a, slot_b;   // the two frames' counters in hud_pixels, of the encoding their scenes are stored in
+} pc;
+
+vec3 at(sampler2D s, vec2 p) { return textureLod(s, p / vec2(pc.size), 0.0).rgb; }
+
+float luma(vec3 c) {
+    float l = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+    return l / (1.0 + l);
+}
+
+float disagreement(vec2 p, vec2 v) {
+    vec2 pa = p + v * pc.tau, pb = p - v * (1.0 - pc.tau);
+    const vec2 taps[5] = vec2[](vec2(0, 0), vec2(2, 0), vec2(-2, 0), vec2(0, 2), vec2(0, -2));
+    float e = 0.0;
+    for (int i = 0; i < 5; i++) e += abs(luma(at(ha, pa + taps[i])) - luma(at(hb, pb + taps[i])));
+    return e * 0.2;
+}
+
+void main() {
+    ivec2 i = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(i, pc.size))) return;
+    vec2 p = vec2(i) + 0.5;
+    vec2 gp = p / 16.0;   // in cells; cell k's centre is at k + 0.5
+    ivec2 g0 = ivec2(floor(gp - 0.5));
+    ivec2 hi = pc.grid - 1;
+    vec2 cand[6];
+    cand[0] = vec2(0.0);
+    cand[1] = textureLod(flow, gp / vec2(pc.grid), 0.0).rg;
+    cand[2] = texelFetch(flow, clamp(g0, ivec2(0), hi), 0).rg;
+    cand[3] = texelFetch(flow, clamp(g0 + ivec2(1, 0), ivec2(0), hi), 0).rg;
+    cand[4] = texelFetch(flow, clamp(g0 + ivec2(0, 1), ivec2(0), hi), 0).rg;
+    cand[5] = texelFetch(flow, clamp(g0 + ivec2(1, 1), ivec2(0), hi), 0).rg;
+    float best = 1e9;
+    vec2 v = vec2(0.0);
+    for (int k = 0; k < 6; k++) {
+        float e = disagreement(p, cand[k]);
+        if (k == 1) e *= 0.85;   // the filtered field moves smoothly: preferred on a near tie
+        if (e < best) { best = e; v = cand[k]; }
+    }
+    // A pixel the same in both frames (the HUD, still parts of the scene) keeps still whatever its neighbourhood does:
+    // near the edge of a HUD element the cross reaches the moving scene, and a moving vector could win there.
+    vec3 d = abs(at(ha, p) - at(hb, p));
+    if (max(d.r, max(d.g, d.b)) < 1.0 / 512.0) { v = vec2(0.0); best = 0.0; }
+    vec3 a = at(ha, p + v * pc.tau), b = at(hb, p - v * (1.0 - pc.tau));
+    vec3 c;
+    if (pc.tau >= 1.0) c = b;
+    else if (best > pc.occlusion) c = pc.tau < 0.5 ? a : b;
+    else c = mix(a, b, pc.tau);
+    if (pc.hud > 0.5 && (hud_pixels[pc.slot_a] > pc.limit || hud_pixels[pc.slot_b] > pc.limit)) {
+        c = at(fb, p);
+    } else if (pc.hud > 0.5) {
+        // the picture differs from its scene by up to half an 8-bit sRGB step (0.0045 near white) where there is no HUD
+        vec3 f = at(fb, p), e = abs(f - at(hb, p));
+        c = mix(c, f, smoothstep(0.008, 0.03, max(e.r, max(e.g, e.b))));
+    }
+    imageStore(dst, i, vec4(c, 1.0));
+}

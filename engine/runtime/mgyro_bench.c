@@ -8,7 +8,8 @@
 // <tests>: "all" or a list (commas or spaces) of look, idle, lin, step, phase, rate, rt, fields, pitchyaw, yawaxis,
 // reverse, cap, recenter, limits, hitch, fps, image, circle, vsine, squid, drift, ink, wall, pokecmp, native, sweep,
 // surface, surfacenew, surfacegame, swim, situ1, situ2, flick, walk; the finder always runs first, after a Y that
-// recentres the camera. "match" or "matchold" alone runs the match test without the finder. TOTK_MGYRO_BENCH_OBJ,
+// recentres the camera. "match" or "matchold" alone runs the match test without the finder, "respawn", "respawnmove",
+// "respawnwalk", "respawnrun" or "respawnrunold" alone a respawn test (a match too). TOTK_MGYRO_BENCH_OBJ,
 // _FIELDS and _POKE: below (watches, pokes).
 // TOTK_MGYRO_BENCH_OUT: the CSV file (default mgyro-bench.csv);
 // TOTK_MGYRO_BENCH_DELAY: seconds after the first live six-axis read before the bench starts (default 40, the test
@@ -28,7 +29,7 @@
 //   F,<slot>,<t>                                     the host present of that frame
 //   W,<read>,<values>                                the watched fields (TOTK_MGYRO_BENCH_FIELDS)
 //   N,<read>,<curve>,<out>,<view>,<want>,<target>,<gain>,<slope>,<resync>,<now>,<step>,<seen>,<base1>,<base2>,<ctrl>,
-//     <latent>,<flags>,<calls>
+//     <latent>,<flags>,<calls>,<input>
 //                                                    mouse_native's linear pitch in the frame before the read
 //                                                    (mouse_native.h MouseNativePitch)
 #include <math.h>
@@ -37,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "auto_match.h"
 #include "cfg.h"
 #include "gfx.h"
 #include "gfx_wsys.h"
@@ -325,9 +327,9 @@ void mgb_read(const MotionState *s, int n, uint64_t now) {
         (long long)ix, (long long)iy, aims);
     watch_line(r);
     MouseNativePitch np = mouse_native_pitch_debug();   // the linear pitch's previous frame (mouse_native.c)
-    out("N,%lld,%.6f,%.6f,%.4f,%.4f,%.4f,%.5f,%.5f,%d,%.6f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%u", (long long)r, np.game,
-        np.out, np.view, np.want, np.target, np.gain, np.slope, np.resync, np.now, np.step, np.seen, np.base1, np.base2,
-        np.ctrl, np.latent, np.flags, np.calls);
+    out("N,%lld,%.6f,%.6f,%.4f,%.4f,%.4f,%.5f,%.5f,%d,%.6f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%u,%.4f", (long long)r,
+        np.game, np.out, np.view, np.want, np.target, np.gain, np.slope, np.resync, np.now, np.step, np.seen, np.base1,
+        np.base2, np.ctrl, np.latent, np.flags, np.calls, np.input);
     last_s0 = s0;
     uint64_t lr = __atomic_load_n(&last_read_ns, __ATOMIC_RELAXED);
     if (lr && now > lr && now - lr < 100000000ull) {   // the frame period, smoothed over about 16 reads
@@ -1016,6 +1018,13 @@ int mgb_native_hold(int def) {
     return v >= 0 ? v : def;
 }
 
+// mgb_native_held: -1 leaves mouse_native.c's own choice
+static volatile int32_t native_held_set = -1;
+int mgb_native_held(int def) {
+    int v = __atomic_load_n(&native_held_set, __ATOMIC_RELAXED);
+    return v >= 0 ? v : def;
+}
+
 // Squid form and back (ZL held, then let go of) while the mouse turns, from a level camera, near the top limit and near
 // the bottom one: in each form a yaw step of 100 counts and a pitch step of 50 (their signs alternate, so the view
 // stays where it is), and a small circle (60 counts in 0.5 s) across each switch, so the mouse moves on both axes while
@@ -1454,6 +1463,142 @@ static void t_match(int old) {
     ev("match done");
 }
 
+// A match's launches from the spawn point and super jumps (no finder, as the match test; SPLAT3_MATCH): the mouse
+// still (respawn) or up and down (respawnmove: 120 counts each way, 1 s a cycle) until 15 s into the battle, through
+// its start; then, until 165 s into it, rounds of a super jump back to the spawn point (X the map, DOWN the spawn
+// point, A the jump) with the mouse still, up and down, or round a small circle (60 counts, 0.5 s a turn) for 8 s from
+// the jump, each followed by a walk forward with ZR held while the view turns slowly (a fall from the stage respawns
+// the player too). Pictures of the screen around each jump. Events "respawn ..." and "end".
+static void t_respawn(int moving) {
+    shots_setup();
+    ev("respawn start moving=%d", moving);
+    uint64_t t0 = kern_now_ns();
+    while (!automatch_battle_on() && kern_now_ns() - t0 < 400000000000ull) {
+        if (moving) {
+            circle_start(120, 1.0, 2, 1000, 0);
+            move_wait();
+        } else {
+            wait_reads(30);
+        }
+    }
+    if (!automatch_battle_on()) { ev("respawn no battle"); return; }
+    uint64_t go = kern_now_ns();
+    ev("respawn go");
+    while (kern_now_ns() - go < 15000000000ull) {
+        if (moving) {
+            circle_start(120, 1.0, 2, 1000, 0);
+            move_wait();
+        } else {
+            wait_reads(30);
+        }
+    }
+    ev("end");
+    static const char *const kinds[] = {"still", "vsine", "circle"};
+    for (int k = 0; (kern_now_ns() - go) * 1e-9 < 165; k++) {
+        int kind = k % 3;
+        ev("respawn jump=%s round=%d", kinds[kind], k);
+        input_inject("X 6");
+        wait_reads(40);
+        __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
+        input_inject("DOWN 6");
+        wait_reads(20);
+        __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
+        wait_reads(5);
+        if (kind == 1) circle_start(120, 1.0, 8, 1000, 0);
+        else if (kind == 2) circle_start(60, 0.5, 16, 1000, 1);
+        input_inject("A 6");
+        for (int i = 0; i < 4; i++) {
+            wait_reads(i ? 60 : 30);
+            __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
+        }
+        move_wait();
+        wait_reads(120);
+        ev("end");
+        ev("respawn walk round=%d", k);
+        input_inject("ZR 360");
+        input_inject("LSTICK 0 32767 360");
+        int n = view_counts(120) * (k & 1 ? -1 : 1);
+        move(n, 0, abs(n) / 6.0, 1000);
+        wait_reads(30);
+        ev("end");
+    }
+    ev("respawn done");
+}
+
+// A match where the player walks forward through the battle, so it falls from the stage or meets the other player's
+// fire and respawns (on a stage whose middle is water for the first minute, picked with the match's rule stage=, a
+// straight walk from the spawn point falls into it): with ZR held and the view turning 60 degrees one way then the
+// other every 10 s (respawnwalk), or straight on without shooting (respawnrun; respawnrunold with release 0.3.7's
+// handling of the frames in which the game holds the camera's turns, mgb_native_held). The game writes the camera's
+// pitch from the frame the player is splatted (mouse_native.c: the N line's flag MOUSE_NATIVE_WRITTEN); from then until
+// the respawn the mouse is still, turns up by 250 counts over 2 s, or goes up and down (120 counts each way, 1 s a
+// cycle, four cycles), and in a fourth case it turns up by 250 counts over the second from the respawn, while the game
+// holds the camera's turns (MOUSE_NATIVE_OFF or MOUSE_NATIVE_HELD). At the spawn point, whose camera is narrow, ZR
+// launches the player. A picture every 2 s. Events "respawnwalk death=<n> mouse=<kind>", "respawnwalk hold",
+// "respawnwalk launch", "end" (2 s after the camera is back to the human form's after the landing).
+static void t_respawn_walk(int run) {
+    shots_setup();
+    ev("respawnwalk start run=%d", run);
+    uint64_t t0 = kern_now_ns();
+    while (!automatch_battle_on() && kern_now_ns() - t0 < 400000000000ull) wait_reads(30);
+    if (!automatch_battle_on()) { ev("respawnwalk no battle"); return; }
+    uint64_t go = kern_now_ns();
+    ev("respawnwalk go");
+    wait_reads(120);
+    static const char *const kinds[] = {"still", "updead", "vsinedead", "uphold"};
+    int deaths = 0, phase = 0, kind = 0, leg = 0;   // phase: 0 alive, 1 dead, 2 held, 3 at the spawn, 4 launched
+    // polls in a row with the camera narrow, and not: the flags are read while the camera may be writing them, so the
+    // camera's state counts once several polls agree
+    int narrow = 0, wide = 0;
+    int64_t phase_reads = 0, leg_reads = 0;
+    for (int64_t i = 0; (kern_now_ns() - go) * 1e-9 < 170; i++) {
+        wait_reads(10);
+        if (i % 12 == 0) __atomic_store_n(&shots_left, 1, __ATOMIC_RELAXED);
+        int flags = mouse_native_pitch_debug().flags;
+        phase_reads += 10, leg_reads += 10;
+        if (phase == 0 && leg_reads >= 600) {   // a leg of walking
+            leg_reads = 0;
+            if (!run) {
+                int n = view_counts(60) * (leg++ & 1 ? -1 : 1);
+                move(n, 0, abs(n) / 0.5, 1000);
+                input_inject("ZR 600");
+            }
+            input_inject("LSTICK 0 32767 600");
+        }
+        int hold = (flags & (MOUSE_NATIVE_OFF | MOUSE_NATIVE_HELD)) != 0;
+        narrow = flags & MOUSE_NATIVE_NARROW ? narrow + 1 : 0;
+        wide = flags & MOUSE_NATIVE_NARROW ? 0 : wide + 1;
+        if (phase == 0 && (flags & MOUSE_NATIVE_WRITTEN || hold)) {   // some deaths write no pitch: the hold first
+            kind = deaths % 4, phase = 1, phase_reads = 0;
+            ev("respawnwalk death=%d mouse=%s%s", deaths++, kinds[kind], hold ? " (seen at the hold)" : "");
+            if (kind == 1) move_start(0, -250, 125, 1000, 0);
+            else if (kind == 2) circle_start(120, 1.0, 4, 1000, 0);
+        }
+        if (phase == 1 && hold) {
+            phase = 2, phase_reads = 0;
+            ev("respawnwalk hold");
+            if (kind == 3) move_start(0, -250, 250, 1000, 0);
+        } else if (phase == 2 && !hold) {
+            phase = 3, phase_reads = 0;
+        } else if (phase == 3 && narrow >= 9) {   // at the spawn point
+            ev("respawnwalk launch");
+            input_inject("ZR 6");
+            narrow = 0;
+        } else if (phase == 3 && phase_reads >= 30 && wide >= 3) {
+            phase = 4, phase_reads = 0;
+        } else if (phase == 4 && narrow >= 12) {
+            phase = 3, phase_reads = 0;
+        } else if (phase == 4 && (flags & (MOUSE_NATIVE_CHANGING | MOUSE_NATIVE_NARROW))) {
+            phase_reads = 0;
+        } else if (phase == 4 && phase_reads >= 120) {
+            ev("end");
+            phase = 0, leg_reads = 600;
+        }
+    }
+    move_wait();
+    ev("respawnwalk done");
+}
+
 // The objects of TOTK_MGYRO_BENCH_OBJ: the function-entry hook for 30 reads, then off.
 static void watch_find(void) {
     if (!nwfn) return;
@@ -1505,6 +1650,13 @@ static void bench_main(void *arg) {
     int found = 0;
     if (!strcmp(list, "match") || !strcmp(list, "matchold")) {   // a match: no Y (menus may be open), no finder (the
         t_match(list[5] != 0);                                      // view is the N line's), the motion only
+        found = -1;
+    } else if (!strcmp(list, "respawn") || !strcmp(list, "respawnmove")) {   // a match too
+        t_respawn(list[7] != 0);
+        found = -1;
+    } else if (!strcmp(list, "respawnwalk") || !strcmp(list, "respawnrun") || !strcmp(list, "respawnrunold")) {
+        if (!strcmp(list, "respawnrunold")) __atomic_store_n(&native_held_set, 0, __ATOMIC_RELAXED);   // 0.3.7's
+        t_respawn_walk(list[7] == 'r');
         found = -1;
     } else {
         // Y: the game recentres its camera behind the player, level (and the virtual controller levels with it)

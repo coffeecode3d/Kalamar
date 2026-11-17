@@ -10,7 +10,7 @@ import { duration, leftForfeit, useC, type CKey } from "./texts";
 import { GameCheckNotice, useGameBlocked } from "./GameCheck";
 import { SLOW_AFTER_S, stateKey as waitKey } from "./waiting";
 import { screenKey, screenWanted, useReduced, useWaitInfo } from "./MatchScreen";
-import { ErrorLine, Left, Who, signed, stageFallback, useAction, useLeft, useModeName, vs } from "./ui";
+import { ErrorLine, Left, RankBadge, Who, signed, stageFallback, useAction, useLeft, useModeName, vs } from "./ui";
 import { DraftLine } from "./Draft";
 import { StageCard, StageTag } from "../stages";
 import { IconCheck, IconClose, IconCrown } from "../icons";
@@ -49,6 +49,35 @@ function WaitProgress({ r, match }: { r: RunnerStatus; match: J }) {
   );
 }
 
+/** The players of a found match, by team, each with their rank; nothing when the server sent no names. */
+function FoundPlayers({ parts, me }: { parts: J[]; me: string | null }) {
+  const { c } = useC();
+  const nameOf = (p: J) => String(p?.member_name ?? p?.user?.display_name ?? "").slice(0, 32);
+  const players = parts.slice(0, 8).filter((p: J) => nameOf(p));
+  if (players.length === 0) return null;
+  return (
+    <div className="cm-found-teams">
+      {(["alpha", "bravo"] as const).map((t) => {
+        const list = players.filter((p: J) => p.team === t);
+        return list.length === 0 ? null : (
+          <div key={t} className={`cm-found-team cm-found-team-${t}`}>
+            <h4>{t === "alpha" ? c("room.alpha") : c("room.bravo")}</h4>
+            <ul className="cm-list">
+              {list.map((p: J) => (
+                <li key={p.user?.id ?? nameOf(p)} className="cm-row">
+                  <Who user={{ display_name: nameOf(p) }} me={p.user?.id === me}>
+                    <RankBadge rating={p.rating} />
+                  </Who>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Accept or decline a found match before its deadline (`queues`). */
 export function MatchFound({ match, onClose, inCard }: { match: J; onClose?: () => void; inCard?: boolean }) {
   const { c, L } = useC();
@@ -68,6 +97,7 @@ export function MatchFound({ match, onClose, inCard }: { match: J; onClose?: () 
       {!inCard && <p className="cm-found-sub">{c("m.found.sub", { format: vs(c, match.rules?.teams), mode: modeName(match.rules?.mode, live.overview?.meta) })}{match.rules?.rated ? ` · ${c("q.rated")}` : ""}</p>}
       {!inCard && stage && <StageCard id={stage} fallback={stageFallback(L, stage, live.overview?.meta)} className="cm-found-stage" />}
       <DraftLine match={match} />
+      <FoundPlayers parts={parts} me={me} />
       {left !== null && <div className="cm-countdown" role="timer" aria-live="polite">{c("m.accept.left", { s: left })}</div>}
       {isSpectator(match) ? (
         <p className="small">{c("st.watching.found")} {c("m.accepted", { n: accepted, total: parts.length })}</p>
@@ -302,7 +332,9 @@ export function MatchCard({ match, compact }: { match: J; compact?: boolean }) {
               <ul className="cm-list">
                 {parts.filter((p: J) => p.team === t).map((p: J) => (
                   <li key={p.user?.id ?? p.member_name} className="cm-row">
-                    <Who user={{ display_name: p.member_name ?? p.user?.display_name }} me={p.user?.id === me} crown={p.role === "host"} />
+                    <Who user={{ display_name: p.member_name ?? p.user?.display_name }} me={p.user?.id === me} crown={p.role === "host"}>
+                      <RankBadge rating={p.rating} />
+                    </Who>
                     <span className="small muted grow">
                       {p.status?.state ? gameState(c, p.status.state) : p.launched ? c("m.launched") : ""}
                     </span>

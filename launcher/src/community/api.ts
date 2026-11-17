@@ -52,7 +52,7 @@ export type Discovered =
 export interface SessionInfo { logged_in: boolean; provider: string | null; user_id: string | null; display_name: string | null }
 export interface StreamInfo { state: "connecting" | "open" | "retrying" | "stopped"; resumed: boolean; retry_in_s: number | null; reason: string | null; last_seq: number }
 export interface RunnerStatus {
-  match_id: string; phase: "checking" | "confirm" | "resolving" | "choosing" | "closing" | "launching" | "continuing" | "running" | "uploading" | "done" | "waiting" | "refused" | "failed" | "closed" | "late";
+  match_id: string; phase: "checking" | "confirm" | "weapon" | "resolving" | "choosing" | "closing" | "launching" | "continuing" | "running" | "uploading" | "done" | "waiting" | "refused" | "failed" | "closed" | "late";
   game_state: string | null; game: GameProgress | null; code: string | null; reason: string | null; relay_ip: string | null; role: string | null; member_name: string | null;
   env: [string, string][]; status_path: string | null; result_path: string | null; result_uploaded: boolean;
   /** `choosing`: slot -> constraint; the imposed loadout (slot -> id); the result's `loadout.ok`. */
@@ -61,6 +61,8 @@ export interface RunnerStatus {
   seat?: "player" | "spectator";
   /** `confirm`: why the launcher asks (`not-joined`, `too-many`), the relay the match names, the seconds left to answer. */
   ask?: "not-joined" | "too-many"; relay?: string; ask_s?: number;
+  /** `weapon`: when the window to change weapon before the launch ends (RFC 3339, the server's clock). */
+  weapon_until?: string;
 }
 export interface Overview {
   server: { id: string; name: string; api: string; relay: string | null };
@@ -104,6 +106,8 @@ export const proto = {
   pickLoadout: (server: string, matchId: string, picks: Record<string, string>) => call<void>("proto_pick_loadout", { server, matchId, picks }),
   /** The player's answer to the launcher's question before a launch (runner phase `confirm`). */
   confirmLaunch: (server: string, matchId: string, start: boolean) => call<void>("proto_confirm_launch", { server, matchId, start }),
+  /** The player is ready during the window to change weapon (runner phase `weapon`): the launch goes on. */
+  weaponReady: (server: string, matchId: string) => call<void>("proto_weapon_ready", { server, matchId }),
   disconnect: (server: string) => call<void>("proto_disconnect", { server }),
   forget: (server: string) => call<void>("proto_forget", { server }),
   /** Opens an https link in the system browser (on the player's click only). */

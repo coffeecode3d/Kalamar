@@ -287,6 +287,11 @@ export const community = {
   "r.more": "Show more",
   "r.season": "Season: {name}",
   "r.last": "Last change: {delta}",
+  "r.placement": "Placement",
+  "r.placement.left": "In placement, games left: {n}",
+  "r.badge.pos": "Rank {pos}",
+  "r.badge.rating": "Rating {rating}",
+  "r.badge.sep": ", ",
 
   "s.title": "Your statistics",
   "s.none": "No statistics yet.",
@@ -652,6 +657,17 @@ export const community = {
   "m.ver.title": "Your game is version {from}: update it to {to}",
   "m.ver.body": "Online play needs Splatoon 3 {to}, and this game is {from}. Update the game, then come back here.",
   "m.ver.btn": "Update the game",
+  "m.runner.weapon": "Last moment to change weapon before the launch",
+  "wp.eyebrow": "Before the launch",
+  "wp.title": "Change weapon?",
+  "wp.sub": "The mode and the stage are set. Your game starts with the weapon below as soon as you are ready, or when the time is up.",
+  "wp.ready": "Ready",
+  "wp.ring": "to choose",
+  "wp.current": "Your weapon",
+  "wp.none": "No weapon chosen: the game keeps the one in its save.",
+  "wp.refused": "This choice was not saved, your weapon stays the same. {reason}",
+  "wp.nocat": "The weapon list is not available (no game data): the game starts with the weapon chosen in the Locker.",
+  "wp.hint": "A weapon or preset chosen here is saved in the Locker and kept for your next games.",
 } as const;
 
 export type CommunityDict = Record<keyof typeof community, string>;

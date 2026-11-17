@@ -1,0 +1,84 @@
+#version 450
+// Frame generation (runtime/vk_framegen.c): block-matching motion search between the two latest game frames. Every
+// cell of the motion field covers 16x16 pixels of the picture and gets the vector from where its content is in the
+// newer frame to where it was in the earlier one, in pixels of the picture.
+//
+// Two passes on the same grid. The coarse one (refine = 0) runs on the sixteenth-size luma and tries every offset
+// within radius texels (radius 8 there: 128 pixels per game frame either way). The fine one (refine = 1) runs on the
+// quarter-size luma and tries every offset within radius texels of zero, then of the best of the coarse vectors of the
+// cell and its four neighbours: around zero always, as a wrong coarse vector would otherwise hide a small motion the
+// fine level sees. Both end with a parabola through the costs beside the best offset on each axis, for a vector finer
+// than a texel. Tried in a CPU port on synthetic frames of known motion: a fixed cost per texel of motion kept
+// low-contrast texture still at any speed, and a coarse search on the quarter-size luma with a stride fell into false
+// minima on fine texture.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D la;      // luma of the earlier frame at this level
+layout(binding = 1) uniform sampler2D lb;      // luma of the newer frame at this level
+layout(binding = 2) uniform sampler2D prior;   // the coarse field (refine = 1); unread otherwise
+layout(binding = 3, rg16f) uniform writeonly image2D flow;
+layout(push_constant) uniform P {
+    ivec2 grid;        // cells of the field
+    ivec2 lsize;       // texels of the luma level
+    int scale;         // picture pixels per texel of the level: 16 or 4
+    int radius;        // offsets tried, in texels of the level
+    int half_window;   // the block is (2 * half_window + 1) texels square
+    int refine;
+} pc;
+
+float fetch(sampler2D s, ivec2 p) { return texelFetch(s, clamp(p, ivec2(0), pc.lsize - 1), 0).r; }
+
+// Mean absolute difference between the newer frame's block around c and the earlier frame's around c + d, made a little
+// larger per texel of motion, so flat areas and ties keep still: in proportion, as a fixed amount outweighs the
+// differences of low-contrast texture and stops all motion there.
+float cost(ivec2 c, ivec2 d) {
+    float s = 0.0;
+    for (int y = -pc.half_window; y <= pc.half_window; y++)
+        for (int x = -pc.half_window; x <= pc.half_window; x++) {
+            ivec2 o = c + ivec2(x, y);
+            s += abs(fetch(lb, o) - fetch(la, o + d));
+        }
+    float n = float((2 * pc.half_window + 1) * (2 * pc.half_window + 1));
+    float m = length(vec2(d));
+    return s / n * (1.0 + 0.01 * m) + 0.0001 * m;
+}
+
+ivec2 best;
+float bc;
+
+// every offset within radius of start
+void around(ivec2 c, ivec2 start) {
+    for (int y = -pc.radius; y <= pc.radius; y++)
+        for (int x = -pc.radius; x <= pc.radius; x++) {
+            ivec2 d = start + ivec2(x, y);
+            float k = cost(c, d);
+            if (k < bc) { bc = k; best = d; }
+        }
+}
+
+void main() {
+    ivec2 g = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(g, pc.grid))) return;
+    ivec2 c = ivec2((vec2(g) + 0.5) * 16.0 / float(pc.scale));   // the cell's centre at this level
+    best = ivec2(0);
+    bc = cost(c, best);
+    around(c, ivec2(0));
+    if (pc.refine != 0) {
+        const ivec2 nb[5] = ivec2[](ivec2(0, 0), ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+        ivec2 start = ivec2(0);
+        float sc = 1e9;
+        for (int i = 0; i < 5; i++) {
+            ivec2 q = clamp(g + nb[i], ivec2(0), pc.grid - 1);
+            ivec2 d = ivec2(round(texelFetch(prior, q, 0).rg / float(pc.scale)));
+            float k = cost(c, d);
+            if (k < sc) { sc = k; start = d; }
+        }
+        around(c, start);
+    }
+    vec2 sub = vec2(0.0);
+    float x0 = cost(c, best - ivec2(1, 0)), x1 = cost(c, best + ivec2(1, 0));
+    float y0 = cost(c, best - ivec2(0, 1)), y1 = cost(c, best + ivec2(0, 1));
+    float dx = x0 + x1 - 2.0 * bc, dy = y0 + y1 - 2.0 * bc;
+    if (dx > 1e-5) sub.x = clamp(0.5 * (x0 - x1) / dx, -0.5, 0.5);
+    if (dy > 1e-5) sub.y = clamp(0.5 * (y0 - y1) / dy, -0.5, 0.5);
+    imageStore(flow, g, vec4((vec2(best) + sub) * float(pc.scale), 0.0, 0.0));
+}

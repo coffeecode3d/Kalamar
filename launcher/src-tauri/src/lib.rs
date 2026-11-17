@@ -257,6 +257,7 @@ pub fn run() {
             proto::glue::proto_engine,
             proto::glue::proto_game_check,
             proto::glue::proto_pick_loadout,
+            proto::glue::proto_weapon_ready,
             proto::glue::proto_confirm_launch,
             proto::glue::proto_forget,
             discord::discord_view,

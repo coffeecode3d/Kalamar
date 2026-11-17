@@ -115,6 +115,7 @@
     [UI_MENU_FXAA_DESC] = "ゲーム本来のFXAAによる輪郭の平滑化です。細かい部分が少しぼやけます。DLAAをオンにしている場合は不要です。",
 
     [UI_MENU_FPS_LIMIT] = "フレームレート上限",
+    [UI_MENU_FPS_LIMIT_DESC_GEN] = "画面に表示する1秒あたりの最大コマ数です。ゲーム自体は毎秒60フレームのままで、60を超えるとゲームのフレームから作った画像を間に表示します（フレーム生成）。数ミリ秒の遅延が加わります。",
     [UI_MENU_FPS_LIMIT_DESC] = "ゲームが1秒間に描画する最大フレーム数です。60を超える設定は実験的で、「ゲーム速度を時計に合わせる」が必要です。",
     [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_40] = "40 FPS", [UI_MENU_FPS_45] = "45 FPS",
     [UI_MENU_FPS_60] = "60 FPS", [UI_MENU_FPS_90] = "90 FPS", [UI_MENU_FPS_120] = "120 FPS", [UI_MENU_FPS_144] = "144 FPS",
@@ -263,6 +264,7 @@
     [UI_KEY_RCTRL] = "右Ctrl", [UI_KEY_LALT] = "Alt", [UI_KEY_CAPSLOCK] = "Caps Lock", [UI_KEY_INSERT] = "Insert",
     [UI_KEY_DELETE] = "Delete", [UI_KEY_HOME] = "Home", [UI_KEY_END] = "End", [UI_KEY_PAGEUP] = "Page Up",
     [UI_KEY_PAGEDOWN] = "Page Down", [UI_KEY_NUM_FMT] = "テンキー %s",
+    [UI_KEY_WHEEL_UP] = "ホイール上", [UI_KEY_WHEEL_DOWN] = "ホイール下",
     [UI_PAD_SOUTH] = "下ボタン", [UI_PAD_EAST] = "右ボタン", [UI_PAD_WEST] = "左ボタン",
     [UI_PAD_NORTH] = "上ボタン", [UI_PAD_LSTICK] = "左スティック", [UI_PAD_RSTICK] = "右スティック",
     [UI_PAD_L] = "左バンパー", [UI_PAD_R] = "右バンパー", [UI_PAD_START] = "スタート", [UI_PAD_BACK] = "バック",
@@ -392,6 +394,7 @@
     [UI_MENU_OV_FPS] = "%.0f FPS", [UI_MENU_OV_FRAME_MS] = "%.1f ms", [UI_MENU_OV_GAME_PCT] = "ゲーム %.0f%%",
     [UI_MENU_OV_MAX_MS] = "最大 %.1f ms",
     [UI_MENU_OV_FPS_LABEL] = "FPS", [UI_MENU_OV_FRAME_LABEL] = "フレーム", [UI_MENU_OV_FMT_FPS] = "%.0f",
+    [UI_MENU_OV_SHOWN_LABEL] = "表示", [UI_MENU_OV_FMT_FACTOR] = "x%.0f",
     [UI_MENU_OV_LOW1] = "1%% 低 %.0f", [UI_MENU_OV_LOW01] = "0.1%% 低 %.0f",
     [UI_MENU_OV_GPU] = "GPU", [UI_MENU_OV_CPU] = "CPU", [UI_MENU_OV_RAM] = "RAM", [UI_MENU_OV_VRAM] = "VRAM",
     [UI_MENU_OV_TEMP] = "温度", [UI_MENU_OV_POWER] = "電力", [UI_MENU_OV_CLOCK] = "クロック",

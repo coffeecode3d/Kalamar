@@ -6,7 +6,7 @@ import { IconAlert, IconCheck, IconClose, Mark } from "../icons";
 
 export type StepState = "done" | "now" | "next" | "failed";
 export interface StageStep { key: string; label: string; state: StepState; detail?: string | null }
-export interface StagePlayer { key: string; name: string; me?: boolean; team?: string | null; teamLabel?: string | null; step: string; progress: number; total: number; bad?: boolean }
+export interface StagePlayer { key: string; name: string; me?: boolean; team?: string | null; teamLabel?: string | null; step: string; progress: number; total: number; bad?: boolean; rank?: ReactNode }
 
 /** A ring that empties as a deadline nears (`fraction` 1 → 0), or turns slowly when nothing is known (`spin`). */
 export function Ring({ fraction, value, caption, spin, tone = "ok" }: { fraction: number | null; value: string; caption?: string; spin?: boolean; tone?: "ok" | "bad" | "done" }) {
@@ -91,7 +91,10 @@ export function PlayerCards({ players, youLabel }: { players: StagePlayer[]; you
         <li key={p.key} className={`st-player ${p.team ? `t-${p.team}` : ""} ${p.bad ? "bad" : ""} ${p.me ? "me" : ""}`}>
           <span className="st-avatar" aria-hidden="true">{p.name.slice(0, 1).toUpperCase()}</span>
           <div className="st-player-text">
-            <span className="st-player-name">{p.name}{p.me && <span className="st-you"> {youLabel}</span>}</span>
+            <span className="st-player-line">
+              <span className="st-player-name">{p.name}{p.me && <span className="st-you"> {youLabel}</span>}</span>
+              {p.rank}
+            </span>
             <span className="st-player-step">{p.teamLabel ? <span className="st-team">{p.teamLabel}</span> : null}{p.step}</span>
             <span className="st-bar" role="img" aria-label={`${p.progress}/${p.total}`}>
               {Array.from({ length: p.total }, (_, i) => <span key={i} className={i < p.progress ? "done" : i === p.progress ? "now" : ""} />)}

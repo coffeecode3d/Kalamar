@@ -37,7 +37,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
-pub const SCHEMA: u32 = 5;
+pub const SCHEMA: u32 = 6;
 /// UI languages and the message archive each one is read from.
 pub const LANGUAGES: [(&str, &str); 4] = [("fr", "EUfr"), ("en", "EUen"), ("es", "USes"), ("ja", "JPja")];
 
@@ -649,6 +649,11 @@ pub const DROPPED_GEAR: [(&str, i64); 6] = [("head", 3007), ("clothes", 1030), (
 pub const SKIN_MAX: i64 = 8;
 pub const EYES_MAX: i64 = 20;
 
+/// The main ability a player only has while a Splatfest runs (Ability Doubler, the Splatfest Tee's own). No Splatfest
+/// runs here, so the gear that carries it is not offered, which also keeps it out of the main abilities a part can take
+/// (`profile::part_main_abilities`); the engine strips it from the save's records (`docs/save-profile.md`).
+pub const FEST_ONLY_ABILITY: &str = "ExSkillDouble";
+
 /// Marks what the save writer cannot apply as unselectable with a reason: the six dropped gear ids, every badge (the
 /// save's record of an acquired badge is unknown, so only already-owned badges are accepted and none can be
 /// promised) and skin or eye indices outside the accepted ranges.
@@ -657,6 +662,12 @@ pub fn apply_save_constraints(cat: &mut Catalogue) {
         if let Some(e) = cat.categories.get_mut(category).and_then(|v| v.iter_mut().find(|e| e.id == id)) {
             e.selectable = false;
             e.unavailable = Some("game_drops".into());
+        }
+    }
+    for part in ["head", "clothes", "shoes"] {
+        for e in cat.categories.get_mut(part).into_iter().flatten().filter(|e| e.ability.as_deref() == Some(FEST_ONLY_ABILITY)) {
+            e.selectable = false;
+            e.unavailable = Some("fest_only".into());
         }
     }
     for e in cat.categories.get_mut("badge").into_iter().flatten() {
@@ -752,7 +763,7 @@ mod tests {
         let mk = |id| Entry { id, selectable: true, ..Default::default() };
         c.categories.insert("head".into(), vec![mk(3007), mk(1000)]);
         c.categories.insert("shoes".into(), vec![mk(2011), mk(3009), mk(3012), mk(4024)]);
-        c.categories.insert("clothes".into(), vec![mk(1030), mk(6003), mk(8031)]);
+        c.categories.insert("clothes".into(), vec![mk(1030), mk(6003), mk(8031), Entry { ability: Some(FEST_ONLY_ABILITY.into()), ..mk(26000) }]);
         c.categories.insert("badge".into(), vec![mk(1)]);
         c.categories.get_mut("skin").unwrap().push(mk(9));
         apply_save_constraints(&mut c);
@@ -763,6 +774,7 @@ mod tests {
         assert!(sel("badge").is_empty());
         assert_eq!(c.categories["badge"][0].unavailable.as_deref(), Some("badge_record"));
         assert_eq!(c.categories["head"][0].unavailable.as_deref(), Some("game_drops"));
+        assert_eq!(c.categories["clothes"][3].unavailable.as_deref(), Some("fest_only"));
         assert_eq!(sel("skin").len(), 9);
         assert_eq!(c.categories["skin"][9].unavailable.as_deref(), Some("outside_range"));
     }

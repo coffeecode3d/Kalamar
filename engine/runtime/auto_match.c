@@ -265,6 +265,7 @@ static void hide(void) {
 // per present do not tell the loading screen from the intro (4000-8000 on both).
 #define STEADY_PRESENTS 13
 static volatile int32_t frames_fine, seq_intro_frames, seq_vss_go;
+int automatch_battle_on(void) { return automatch_on && LOAD(seq_vss_go) != 0; }
 static void frames_main(void *arg) {
     (void)arg;
     GfxStats g = gfx_stats();

@@ -1,0 +1,54 @@
+#version 450
+// Frame generation (runtime/vk_framegen.c), first pass of each game frame: the crop rectangle of the game's picture
+// into the frame's history image (RGBA16F, the values a blit of the picture would read), the same rectangle of the
+// scene as it was before the HUD was drawn over it (vk_framegen_pass's copy; the picture itself when there is none)
+// into the frame's scene image, and the scene's luma at a quarter of the size for the motion search. One invocation per
+// quarter-size texel, that is per 4x4 pixels of the picture. It also counts the pixels where the picture differs from
+// its scene (the HUD's, vk_framegen.c checks the copy belongs to this frame with it), twice: against the scene as it
+// is and sRGB-encoded, as the picture is an sRGB target whose texels are read without their decode; the scene is
+// stored in the encoding vk_framegen.c chose from the earlier counts (encode).
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D src;
+layout(binding = 1, rgba16f) uniform writeonly image2D hist;
+layout(binding = 2, r16f) uniform writeonly image2D luma;
+layout(binding = 3) uniform sampler2D scene_src;
+layout(binding = 4, rgba16f) uniform writeonly image2D scene;
+layout(std430, binding = 5) buffer Stats { uint hud_pixels[]; };   // per frame: as it is, sRGB-encoded
+layout(push_constant) uniform P {
+    ivec2 offset;   // the crop rectangle's corner in src and scene_src
+    ivec2 size;     // its size, the size of hist and scene
+    int slot;       // this frame's counters in hud_pixels: 2 * slot and 2 * slot + 1
+    int encode;     // 1: the scene is stored sRGB-encoded
+} pc;
+
+vec3 srgb(vec3 c) {
+    c = clamp(c, 0.0, 1.0);
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+
+void main() {
+    ivec2 q = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(q, (pc.size + 3) / 4))) return;
+    float sum = 0.0;
+    int n = 0;
+    uint differ = 0, differ_enc = 0;
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++) {
+            ivec2 p = q * 4 + ivec2(x, y);
+            if (any(greaterThanEqual(p, pc.size))) continue;
+            vec3 f = texelFetch(src, p + pc.offset, 0).rgb;
+            imageStore(hist, p, vec4(f, 1.0));
+            vec3 c = texelFetch(scene_src, p + pc.offset, 0).rgb, ce = srgb(c);
+            vec3 e = abs(f - c), ee = abs(f - ce);
+            if (max(e.r, max(e.g, e.b)) > 0.03) differ++;
+            if (max(ee.r, max(ee.g, ee.b)) > 0.03) differ_enc++;
+            if (pc.encode != 0) c = ce;
+            imageStore(scene, p, vec4(c, 1.0));
+            float l = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+            sum += l / (1.0 + l);   // HDR pictures go above 1: compressed, so bright areas do not dominate the search
+            n++;
+        }
+    imageStore(luma, q, vec4(sum / float(max(n, 1))));
+    if (differ > 0u) atomicAdd(hud_pixels[2 * pc.slot], differ);
+    if (differ_enc > 0u) atomicAdd(hud_pixels[2 * pc.slot + 1], differ_enc);
+}

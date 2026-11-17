@@ -1,7 +1,7 @@
 {
   "name": "kalamar-launcher",
   "private": true,
-  "version": "0.3.5",
+  "version": "0.3.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "shots": "node scripts/ui-shots.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:ui": "node --test src/community/waiting.test.mjs src/community/queueHint.test.mjs src/community/draftState.test.mjs src/community/cleanText.test.mjs src/community/openGameLogic.test.mjs src/redact.test.mjs src/locales/locales.test.mjs src/gameLang.test.mjs src/sound/sounds.test.mjs src/install/wait.test.mjs src/discord/presence.test.mjs src/pages/profile/subSlots.test.mjs src/pages/profile/presetLogic.test.mjs src/update/prompt.test.mjs",
+    "test:ui": "node --test src/community/waiting.test.mjs src/community/rank.test.mjs src/community/queueHint.test.mjs src/community/draftState.test.mjs src/community/weaponState.test.mjs src/community/cleanText.test.mjs src/community/openGameLogic.test.mjs src/redact.test.mjs src/locales/locales.test.mjs src/gameLang.test.mjs src/sound/sounds.test.mjs src/install/wait.test.mjs src/discord/presence.test.mjs src/pages/profile/subSlots.test.mjs src/pages/profile/presetLogic.test.mjs src/update/prompt.test.mjs",
     "tauri": "tauri",
     "tauri:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-build.ps1",
     "bundle:runtime": "node scripts/bundle-runtime.mjs"

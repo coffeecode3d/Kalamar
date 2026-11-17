@@ -12,6 +12,8 @@
 // Names are made up; stage ids are the made-up ones of catalogue.ts.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { RANKS } from "./ranks";
+
 const L = (fr: string, en: string, es: string, ja: string) => ({ fr, en, es, ja });
 const user = (id: string, name: string) => ({ id, display_name: name });
 export const ME = user("u-me", "Mira");
@@ -55,7 +57,9 @@ function watchers(state: string | null, mine: boolean): any[] {
   return [mine ? s(ME) : s(NOOR)];
 }
 const RULES = (stage: string | null) => ({ teams: [1, 1], mode: "turf", rated: false, stage, options: {}, spectators: { seats: 2, who: "friends", wait_s: 60, open: false }, result_policy: "agree" });
-const player = (u: any, team: string, role: string, state: string | null, accept = "accepted") => ({ user: u, member_name: u.display_name, team, role, accept, launched: !!state, status: state ? { state } : null, reported: state === "results" || state === "finished" });
+// In the stands' matches Pablo is #1 and Sacha is placed but not listed; the player is #12.
+const STANDS_RANK: Record<string, any> = { "u-me": RANKS.twelve, "u-2": RANKS.first, "u-3": RANKS.unlisted };
+const player = (u: any, team: string, role: string, state: string | null, accept = "accepted") => ({ user: u, member_name: u.display_name, team, role, accept, launched: !!state, status: state ? { state } : null, reported: state === "results" || state === "finished", rating: STANDS_RANK[u.id] });
 const YOU_WATCH = { user_id: "u-me", member_name: "Mira", team: "spectator", seat: "spectator", role: "join", referee: false, left: false };
 
 /** The match of `&match=` when the player watches it (or, `players`, plays a watched one). */

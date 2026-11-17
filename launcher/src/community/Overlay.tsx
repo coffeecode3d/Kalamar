@@ -9,6 +9,8 @@ import { LaunchQuestion, MatchCard, MatchFound } from "./Match";
 import { MatchScreen, screenKey, screenWanted, useReduced } from "./MatchScreen";
 import { DraftScreen } from "./Draft";
 import { draftWanted } from "./draftState";
+import { WeaponWindow } from "./WeaponWindow";
+import { weaponWanted } from "./weaponState";
 import { useCommunitySounds } from "../sound/events";
 import { setSpectating } from "../sound/engine";
 import { isSpectator } from "./Stands";
@@ -43,9 +45,11 @@ export default function CommunityOverlay({ onPage, server, autoConnect }: { onPa
   const r = live.runner && m && live.runner.match_id === m.id ? live.runner : null;
   const [reduced, setReduced] = useReduced();
   const screen = !!r && screenWanted(r) && reduced !== screenKey(r);
+  // The window to change weapon before the launch (runner phase `weapon`): over the draft's last screen.
+  const weapon = weaponWanted(live.runner, m) ? live.runner : null;
   // 1.1.6: the stage draft, from "everyone accepted" until the game is on its way (then the match screen).
   const draftKey = m ? `${m.id}:draft` : "";
-  const drafting = !!m && draftWanted(m) && !(r && screenWanted(r)) && reduced !== draftKey;
+  const drafting = !!m && draftWanted(m) && !(r && screenWanted(r)) && reduced !== draftKey && !weapon;
   useCommunitySounds(m, mine?.accept, live.room, me);
   // 1.1.7: a spectator gets no "your game starts" sound.
   const watching = (!!m && isSpectator(m)) || r?.seat === "spectator";
@@ -86,6 +90,7 @@ export default function CommunityOverlay({ onPage, server, autoConnect }: { onPa
       )}
       {screen && r && <MatchScreen r={r} match={m} onReduce={() => setReduced(screenKey(r))} />}
       {drafting && <DraftScreen match={m} onReduce={() => setReduced(draftKey)} />}
+      {weapon && <WeaponWindow key={weapon.match_id} r={weapon} match={m && m.id === weapon.match_id ? m : null} />}
       {!onPage && m && !mustAnswer && (
         <div className="cm-float" role="status">
           <MatchCard match={m} compact />

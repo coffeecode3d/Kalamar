@@ -120,6 +120,12 @@ not `HowToGet: Impossible`) has as its main ability, read from the player's tabl
 slot can hold, plus the main-only ones of that part. Another part's main-only ability, an unknown name or value, and
 the empty value (`"None"`, -1) refuse the whole profile with the reason logged, as for the other fields.
 
+The Splatfest-only main ability (`ExSkillDouble`, Ability Doubler, the Splatfest Tee's own) is the exception: in the
+game a player has it only while a Splatfest runs, and no Splatfest runs here. `main_abilities` leaves it out with a line in the log (the
+part keeps its piece's ability), and every time a profile is applied (a match loadout included) each owned piece whose record
+holds it gets the main ability of its gear table row back; the Splatfest Tee, whose own it is, gets the first ability
+of the enum (value 0). A save played without any profile is not touched.
+
 `main_abilities` applies to the pieces equipped once the profile's `gear` is in (the profile's, else the save's), and
 only to the parts it names; a match loadout (`KLM_MATCH_LOADOUT`) takes it too. In a match the game sends each worn
 piece's main ability to the other players: the result file's `abilities` lists it first

@@ -28,6 +28,22 @@ use std::time::{Duration, Instant};
 /// own sentence for it; the server gets `launcher-failed` with the reason, as for any failed launch).
 pub const CODE_NOT_CLOSED: &str = "game-not-closed";
 
+/// The window to change weapon before the launch (phase `weapon`): how long it lasts at most, the margin it leaves
+/// before the match's launch deadline (the server voids the match of a player who has not launched by then), and the
+/// shortest window that margin may leave (else there is none).
+pub const WEAPON_WINDOW: Duration = Duration::from_secs(20);
+pub const WEAPON_MARGIN_S: i64 = 45;
+pub const WEAPON_MIN_S: i64 = 5;
+
+/// How long the window to change weapon lasts: `window`, cut so that it ends at least [`WEAPON_MARGIN_S`] before the
+/// launch deadline (`deadline` and `now`: the server's clock, Unix seconds); `None` (no window) when the deadline leaves
+/// fewer than [`WEAPON_MIN_S`]. No deadline: the whole window.
+pub fn weapon_window(window: Duration, deadline: Option<i64>, now: i64) -> Option<Duration> {
+    let Some(deadline) = deadline else { return Some(window) };
+    let room = deadline - now - WEAPON_MARGIN_S;
+    (room >= WEAPON_MIN_S).then(|| window.min(Duration::from_secs(room as u64)))
+}
+
 /// The game process as the runner needs it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameRun {
@@ -88,6 +104,11 @@ pub trait GameHost: Send + Sync {
     fn current_main_abilities(&self) -> HashMap<String, String> {
         HashMap::new()
     }
+    /// The launcher applies its profile at the launch (`apply_profile`): the game starts with the Locker's weapon, so
+    /// the player is given a moment to change it before a match's launch (phase `weapon`). Off by default.
+    fn applies_profile(&self) -> bool {
+        false
+    }
     /// Developer tools only (`proto_peer --loadout-rules`): loadout constraints handled as if the match carried them
     /// (`rules.loadout`), to try the launcher's loadout path with a server that imposes none. The launcher never sets it.
     fn local_loadout_rules(&self) -> Option<Value> {
@@ -99,7 +120,7 @@ pub trait GameHost: Send + Sync {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RunnerStatus {
     pub match_id: String,
-    /// `checking`, `confirm` (the launcher asks its player before the launch, `consent`), `resolving`, `closing` (the game the player had open for solo play is closed), `launching`, `continuing` (sent to the open game), `running`, `uploading`, `done`,
+    /// `checking`, `confirm` (the launcher asks its player before the launch, `consent`), `weapon` (the player may change weapon before the launch), `resolving`, `closing` (the game the player had open for solo play is closed), `launching`, `continuing` (sent to the open game), `running`, `uploading`, `done`,
     /// `waiting` (the game stays open for the next round), `refused`, `failed`, `closed`.
     pub phase: String,
     /// The game's last state from its status file.
@@ -141,6 +162,9 @@ pub struct RunnerStatus {
     pub relay: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ask_s: Option<u64>,
+    /// `weapon`: when the window to change weapon ends (RFC 3339, the server's clock, like the match's deadlines).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weapon_until: Option<String>,
 }
 
 pub trait RunnerSink: Send + Sync {
@@ -183,8 +207,12 @@ pub struct Runner {
     picks: Mutex<HashMap<String, HashMap<String, String>>>,
     /// The player's answers to the launcher's question before a launch (`confirm`), by match id.
     answers: Mutex<HashMap<String, bool>>,
+    /// The matches whose player is ready during the window to change weapon (`weapon`).
+    ready: Mutex<HashSet<String>>,
     /// The longest the question waits for an answer (the match's launch deadline comes first).
     pub ask_max: Duration,
+    /// The longest the window to change weapon lasts ([`WEAPON_WINDOW`]; the match's launch deadline comes first).
+    pub weapon_max: Duration,
     /// How often the status file is read.
     pub poll: Duration,
     /// How long an open game waits for a continuing match when the match gave no `continue_window_s` (1.1.1 default).
@@ -215,7 +243,9 @@ impl Runner {
             session: Mutex::new(None),
             picks: Mutex::new(HashMap::new()),
             answers: Mutex::new(HashMap::new()),
+            ready: Mutex::new(HashSet::new()),
             ask_max: Duration::from_secs(120),
+            weapon_max: WEAPON_WINDOW,
             poll: Duration::from_millis(400),
             idle_quit: Duration::from_secs(90),
         })
@@ -247,6 +277,11 @@ impl Runner {
     /// The player's answer to the question before the launch of a match (runner phase `confirm`).
     pub fn answer(&self, match_id: &str, start: bool) {
         lock(&self.answers).insert(match_id.to_string(), start);
+    }
+
+    /// The player is ready during the window to change weapon before the launch of a match (runner phase `weapon`).
+    pub fn weapon_ready(&self, match_id: &str) {
+        lock(&self.ready).insert(match_id.to_string());
     }
 
     /// Tells an open game to close (`quit`) and forgets the session.
@@ -385,6 +420,7 @@ impl Runner {
             ask: None,
             relay: None,
             ask_s: None,
+            weapon_until: None,
         };
         self.publish(&st);
         // 1. Check: a match this launcher and its engine cannot run exactly is refused, never adapted.
@@ -460,6 +496,23 @@ impl Runner {
                 self.finish(&id);
                 return;
             }
+        }
+        // 2a'. The mode and the stage are final: before anything is closed or started, the player may change the weapon
+        // the game will start with (its profile's, read at the launch), until they are ready or shortly before the
+        // launch deadline. Only a player's new game, for a match found ready, whose weapon the match leaves free.
+        let weapon_free = !plan.loadout.iter().any(|(slot, _)| slot == "weapon");
+        if !continuing
+            && !plan.spectator
+            && own == contract::OwnPart::Fresh
+            && weapon_free
+            && m.get("state").and_then(Value::as_str) == Some("ready")
+            && self.host.applies_profile()
+            && !self.choose_weapon(&id, &m, &mut st).await
+        {
+            st.phase = "closed".into();
+            self.publish(&st);
+            self.finish(&id);
+            return;
         }
         if !continuing && self.session_alive() {
             // Another match comes: the open game cannot play it. It closes first.
@@ -804,6 +857,31 @@ impl Runner {
         yes
     }
 
+    /// The window to change weapon before the launch (phase `weapon`, [`weapon_window`]): until the player is ready
+    /// ([`Runner::weapon_ready`]), the match ends, or its time is up. Nothing is changed here: the game starts with what
+    /// the profile holds at the launch. `false`: the match ended meanwhile.
+    async fn choose_weapon(&self, id: &str, m: &Value, st: &mut RunnerStatus) -> bool {
+        let now_ms = chrono::Utc::now().timestamp_millis() + self.client.offset_s() * 1000;
+        let deadline = m.pointer("/deadlines/launch").and_then(Value::as_str).and_then(crate::proto::tokens::parse_time);
+        let Some(left) = weapon_window(self.weapon_max, deadline, now_ms.div_euclid(1000)) else { return true };
+        lock(&self.ready).remove(id);
+        st.phase = "weapon".into();
+        st.weapon_until = chrono::DateTime::from_timestamp_millis(now_ms + left.as_millis() as i64).map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+        self.publish(st);
+        let until = Instant::now() + left;
+        while Instant::now() < until && !self.ended(id) && !lock(&self.ready).contains(id) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        lock(&self.ready).remove(id);
+        st.weapon_until = None;
+        if self.ended(id) {
+            return false;
+        }
+        st.phase = "checking".into();
+        self.publish(st);
+        true
+    }
+
     /// The match's relay is one the server announced: an entry of `meta.relays`, the meta's `relay`, or the relay saved
     /// with the server when it was added (its discovery document). Same name (or address) and same port.
     async fn relay_announced(&self, plan: &GamePlan) -> bool {
@@ -1000,5 +1078,17 @@ mod tests {
         append_command(&f, "quit").unwrap();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "next id=m_2\nquit\n");
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_weapon_window_ends_well_before_the_launch_deadline() {
+        let w = WEAPON_WINDOW;
+        assert_eq!(weapon_window(w, None, 1000), Some(w), "no deadline: the whole window");
+        assert_eq!(weapon_window(w, Some(1000 + 90), 1000), Some(w), "the server's default deadline leaves room for it");
+        assert_eq!(weapon_window(w, Some(1000 + 45 + 12), 1000), Some(Duration::from_secs(12)), "cut 45 s before the deadline");
+        assert_eq!(weapon_window(w, Some(1000 + 45 + 5), 1000), Some(Duration::from_secs(5)));
+        assert_eq!(weapon_window(w, Some(1000 + 45 + 4), 1000), None, "fewer than 5 s left: no window");
+        assert_eq!(weapon_window(w, Some(1000 + 30), 1000), None);
+        assert_eq!(weapon_window(w, Some(900), 1000), None, "a deadline already past");
     }
 }
