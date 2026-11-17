@@ -97,9 +97,13 @@ jobs:
           variables > Actions), or merge by hand."
           else
             title="Upstream sync needs a hand: the merge into linux conflicts"
-            reason="The weekly merge of \`CyriacFR/Kalamar\`'s \`main\` into \`linux\` conflicts. Nothing was pushed."
+            reason="The hourly merge of \`CyriacFR/Kalamar\`'s \`main\` into \`linux\` conflicts. Nothing was pushed."
           fi
-          open=$(gh issue list --state open --json title --jq "[.[] | select(.title == \"$title\")] | length")
+          # Issues are an optional channel: a fork may have them turned off, and then the failing run is the report.
+          if ! open=$(gh issue list --state open --json title --jq "[.[] | select(.title == \"$title\")] | length" 2>/dev/null); then
+            echo "::error::$title: $reason"
+            exit 0
+          fi
           if [ "$open" != "0" ]; then
             echo "An open issue already describes this."
             exit 0
