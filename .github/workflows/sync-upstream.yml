@@ -50,7 +50,9 @@ jobs:
           set -uo pipefail
           git remote get-url upstream >/dev/null 2>&1             || git remote add upstream https://github.com/CyriacFR/Kalamar.git
           git fetch --no-tags --quiet upstream main
-          if git merge-base --is-ancestor upstream/main origin/main; then
+          # linux is the branch checked out here; main is only the mirror the merge-upstream API fast-forwards, and it
+          # moves even when the merge into linux fails, so asking about main would stop every later run.
+          if git merge-base --is-ancestor upstream/main HEAD; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
             echo "linux already has everything upstream/main has"
           fi
