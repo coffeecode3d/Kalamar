@@ -347,19 +347,19 @@ whose effect does not follow:
 
 | Step | Presses | Effect waited for |
 |---|---|---|
-| the local lobby is up | none | the `LobbyLocal` scene pack opens (`romfs.c`), then the nifm local-network request is accepted (the lobby's `InitLan`) |
-| session list | `L`, `A` | the session library binds UDP 35000 (`lan_net.c` observer) |
+| the local lobby is up | none | the `LobbyLocal` scene pack opens (`romfs.c`), then the nifm local-network request is accepted (the lobby's `InitLan`), then the lobby's sequence is idle ([The lobby's menu](#the-lobbys-menu); 4 s without its offsets) |
+| session list | `L` until the menu runs (`A` between two, which moves a welcome message on), then `A` until the menu's state leaves its private battle | the session library binds UDP 35000 (`lan_net.c` observer) |
 | list searched | none | the library's browse job ends (hooked step `main+0x974f10`, `BrowseSessionJob::CompleteProcess`); a press before that is lost |
-| host: create | `Y`, `A` | the library's network restarts: 35000 closed and bound again |
+| host: create | `Y`, then once the creation dialog runs `A` until the lobby's sequence creates (state 17) | the library's network restarts: 35000 closed and bound again |
 | host: players in | none | session traffic on 49152 from as many other addresses as `players` - 1 |
 | host: mode, stage, other settings | none: written at the room screen's commit ([Room settings](#room-settings)) | the room's net states hold them (10 s at most) |
 | host: teams | none: each row's team written into the save at the room screen's commit, before the team screen opens on them | read back from the save |
-| host: ready | once the room screen has shown its state (`+0x14`) for 60 frames: `Down`, `Down`, `A`, again after 180 frames while the state does not change (a screen back after a match ignores presses during its entry) | the state changes: the game's check of the player list |
+| host: ready | once the lobby's menu is on its room (state 8) and the room screen has shown its state (`+0x14`) for 60 frames: `Down`, `Down`, `A`, again after 180 frames while the state does not change (a screen back after a match ignores presses during its entry) | the state changes: the game's check of the player list |
 | host: team screen | none | the room screen's state is the team screen's (7) and has been for 30 frames ([Slow machines](#slow-machines)) |
-| host: teams OK | `Down` once per row and once more, `A`, again after 180 frames while the team screen stays | the team screen is left; every asked row has its team in the room |
-| guest: a session | `X` (search again) until one answers | a datagram on 35000 from another address starting with byte 1 (an answer; a search starts with 0), then the search's end |
-| guest: join | `A`, `A` | the library's network restarts |
-| pre-match | `A` every 2.5 s (host) / 3 s (guest) | the stage's scene pack opens (all of them open once at boot; this is the second time) |
+| host: teams OK | `Down` once per row and once more (12 frames apart), `A`, again after 180 frames while the team screen stays | the team screen is left; every asked row has its team in the room |
+| guest: a session | `X` (search again, 1 s after the last search ended) until one answers | a datagram on 35000 from another address starting with byte 1 (an answer; a search starts with 0), then the search's end |
+| guest: join | `A`, then once the session's dialog runs `A` until the lobby's sequence joins (state 20) | the library's network restarts |
+| pre-match | `A` every 0.5 s (host) / 1 s (guest) while the lobby's menu is on its room or its private battle, `L` while it is closed; without its offsets `A` every 2.5 s (host) / 3 s (guest) | the stage's scene pack opens (all of them open once at boot; this is the second time); a later round on the stage of the round before opens no pack: its intro's music opening stands for it ([Rounds](#rounds)) |
 | stage intro | none | the intro's music opens and the presents run steadily ([Out of sight](#out-of-sight)): the window is shown |
 | match, results | none once shown (`A` every 4 s while hidden) | the match record appears (below) |
 
@@ -375,9 +375,38 @@ When the session library restarts its network for a join it closes its two socke
 while its receive thread may still be inside a call on the old socket: a bind waits up to 0.5 s for such a socket to
 be released (`lan_net.c`), or the join would fall back to the plaza.
 
-What a direct path (calling the game instead of pressing) would still need: the lobby menu's handlers that post the
-create and join requests and keep the menu in step with the session (the delegates' sources) and the pre-match
-"start". The room's settings and teams are no longer pressed blind: below.
+### The lobby's menu
+
+Measured on 11.3.0 with function censuses around each press, function-entry traces and the log lines the flow writes
+(`lobby sequence state a -> b`, `lobby menu state a -> b`); the offsets are `splat3_addr.c`'s `lobby_*`,
+`create_dialog` and `join_dialog` (11.3.0 only: on 11.2.0 the flow keeps its fixed waits).
+
+- The local lobby is a sequence (its frame update `main+0x38aa030`, x0 the sequence) whose state (`+0x30`) goes 7 then
+  3 once the network is up, 4 and 6 for the "network ready" notice, 3 idle, 16 while the session list searches, 17
+  creating a session, 20 joining one, 23 to 26 from "ready" to the team screen. Its request to create a session
+  (`main+0x38a9180`) refuses while the lobby is busy (not in state 0, 3 or 27, a system window up, notices pending):
+  the flow waits for none of these to hold instead of 4 s (about 1 s after the network is up).
+- Its menu (`L`, update `main+0x391e480`) runs only while it is open; its state (`+0xa0`) is 0 on its private battle,
+  1 once `A` picked it, 2 the session list, 8 the room screen, 9 closing. Once the sequence is idle a welcome message
+  can still be up: `L` does nothing then and `A` moves the message on, so the flow presses `L` until the menu runs,
+  with an `A` between two. The menu takes `A` only once its opening ends (measured 0.5 to 0.6 s), and the creation
+  dialog (`Y`) and a listed session's dialog (`A`) likewise (1.0 to 1.5 s): `A` again every 250 ms until the state
+  moves on, never after.
+- Back from a match, the host's menu reached its room up to 11 s after the room screen's own state: a "ready" pressed
+  before that was lost and retried after 180 frames, so the flow waits for the menu's room first.
+- Creating the session directly: the sequence's request, called from its own update on the game's thread with the
+  creation dialog's parameters, made the session about 1 s after the network was up (a guest joined it), but left
+  the host in the lobby's free roam: the menu and the room screen follow only requests that come from them (the
+  network requests run as delegates on the network system's worker, `main+0x44ffbe0`; the menu opens the room screen
+  when its own dialog reports the creation), and the menu then offered the empty session list. The flow presses.
+
+Measured with two games on one PC (relay mode, 60 frames a second), the first round, from the host's start: its
+session made at 14.4 and 15.4 s, every player in at 19.5 and 21.3 s, its stage intro at 36.5 and 35.9 s (2 runs;
+the run before the change: 18.1, 26.8 and 43.3 s). Later rounds: 38.9 and 40.3 s from `next` to the intro, and 49.9 s
+in a run before the flow waited for the menu's room; the spread comes from the host's "ready", which back from a match
+the game took up to 2 retries (180 frames each) late even with the menu on its room.
+
+The room's settings and teams are no longer pressed blind: below.
 
 ### Slow machines
 
@@ -399,7 +428,10 @@ set, the cursor on the second row and "Teams OK" not taken. Late input and input
 the game in the same frames with them off, and the check outlasts the 3 s the same way.
 
 Every step of the room screen now waits for the screen's own state, and its presses are spaced in the game's frames
-(`press_paced`: each press held 6 frames, the next one 48 frames later on the room, 30 on the team screen):
+(`press_paced`: each press held 6 frames, the next one 48 frames later on the room, 12 on the team screen: measured,
+3 runs of 3 `Down`s at 12 taken, "Teams OK" 1.0 s after the team screen opened instead of 2.1 s at 30; with 8 players
+its 9 `Down`s take 1.8 s instead of 4.5 s at 60 frames a second, and twice that on a host at 30; an `Up` on the first
+row does not wrap to "Teams OK"):
 
 - "ready": once the room screen has shown its state for 60 frames; again after 180 frames without a change;
 - the team screen: the flow waits for its state and 30 frames in it, however long the check lasts;
@@ -418,12 +450,13 @@ before the fix stopped with `teams-not-set` in TB_FAIL of 10 runs, and in TL_FAI
 off; the fix set the teams in TX_OK of 20 runs.
 
 Still timed in seconds, each followed by a check of its effect and retried until its step's time
-(`KLM_MATCH_TIMEOUTS`) is up, so a slow machine only takes longer: the session list (`L`, `A` 1.5 s later; the lobby
-first shows welcome messages that the `A`s move on: the list opened at the fourth try in the runs above, slow host or
-not, 40 to 50 s after the start), creating and
-joining a session (`Y` or `A`, then `A` 1.5 s later, checked on the library's network restart), the 3 s (5 s after a
-match) before the room's settings are read back. Not checked by an effect: a guest's `L`, `A` back into the room
-between [Rounds](#rounds) (1.5 s and 2 s apart), measured at 60 frames a second only.
+(`KLM_MATCH_TIMEOUTS`) is up, so a slow machine only takes longer: the 3 s (5 s after a match) before the room's
+settings are read back, and on a build without the lobby's offsets ([The lobby's menu](#the-lobbys-menu), 11.2.0) the
+session list (`L`, `A` 1.5 s later; the lobby first shows welcome messages that the `A`s move on: the list opened at
+the fourth try in the runs above, slow host or not, 40 to 50 s after the start), creating and joining a session (`Y`
+or `A`, then `A` 1.5 s later, checked on the library's network restart) and a guest's `L`, `A` back into the room
+between [Rounds](#rounds) (alternating at the pre-match). With the offsets those presses wait for the menu and the
+dialogs instead, measured at 60 frames a second only.
 
 ## Room settings
 
@@ -479,6 +512,13 @@ room screen, the guest's in the lobby, both members in the room; no scene pack i
 (`LobbyLocal` stays loaded), so the runtime takes the room screen's update running again (`main+0x38f7ff0`, hooked from
 the record on) as the end of the result screens.
 
+A round on the stage of the round before reloads no stage pack either (measured: two rounds with the same `stage=`,
+and a random stage that fell on the same one; before this was handled the second match was played with the flow
+still pressing at its pre-match screen, no result written and `start-timeout` at the step's end). The intro's music
+is streamed anew for each match and is then the first file the stage opens: from the second round on, while the flow
+waits at the pre-match screen, that music opening counts as the stage loading, with the stage name of the round
+before (`automatch_file`).
+
 The result screens are the player's: the window is shown from the intro to the room. When the player gives no input
 (gamepad, keys or mouse; `input_human_last_ms`, `input.c`) for `results_hold` seconds, the runtime presses A every
 2 s, which moves the screens on, until the room screen is up (out of sight, `KLM_MATCH_REVEAL=never`: A every 4 s at
@@ -492,7 +532,11 @@ line appended to the command file (only lines appended after the game started co
   round, then ready, teams (a round starts from the last round's teams: they are written again), start. Guest: back
   from a match it stands in the lobby, where A does not confirm the pre-match screen (the game would then start
   the match only at the end of its own countdown, 90 s after the host's "Teams OK"); L and A open the room as at the
-  first round, then A at the pre-match screen. The window is shown again at the next intro.
+  first round, then A at the pre-match screen. When the guest is still in the room's free roam at the pre-match
+  screen, its "A OK!" does not take A (A jumps there), so from the second round a guest alternates L (the match menu)
+  and A at the pre-match screen: A confirms in the match menu as at the first round. Measured with two games on one
+  PC (relay mode, 60 frames a second): without it every later round measured waited for the 90 s countdown (6 of 6),
+  with it the stage loaded 7 to 9 s after the host's "Teams OK" (3 of 3). The window is shown again at the next intro.
 - `quit`: the window stays hidden and the game closes (exit code 0).
 
 Each round's result file has `"round": <n>`; its timeline has the time from the `next` command to the round's intro
@@ -501,7 +545,7 @@ Each round's result file has `"round": <n>`; its timeline has the time from the 
 The room screen's update also runs in a guest's lobby, so it is not the end of a guest's result screens: a guest
 presses A through its result screens for 20 s once they advance (`GUEST_RESULTS_MS`), then opens the room with L and
 A at the next round. A round in the same room reaches its intro about 20 s after the `next` command, against about
-50 s from a game's start.
+50 s from a game's start (37 s measured with two games on one PC, both games' rounds included).
 
 ## The result
 

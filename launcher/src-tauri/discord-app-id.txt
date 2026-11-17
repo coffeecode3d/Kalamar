@@ -1,0 +1,5 @@
+# The Discord application whose name and pictures the releases' opt-in Discord presence shows
+# (launcher/docs/discord-presence.md). One line of 17 to 20 digits: the application id, which is public.
+# Read by scripts\release-build.ps1 and scripts\make-release.ps1 only: a development build has no Discord feature.
+# A fork that releases its own builds puts its own application's id here, or leaves no id for releases without it.
+1571132212093391008

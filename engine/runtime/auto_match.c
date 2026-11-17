@@ -81,7 +81,6 @@ static char match_id[65] = "none", result_path[512], status_path[512], shots_dir
             self_name[64];
 static uint64_t main_base, t0_ms;
 static double t0_unix;   // wall clock (UTC seconds) at t0_ms, so a launcher can relate the timeline to its own clock
-
 // Teams by name (SPLAT3_MATCH_RULES teams=<name>:<A|B|->,...): relay mode, where the relay names each member
 static struct { char name[33]; char team; } by_name[10];   // the room has 10 places (8 players, 2 spectators)
 static int nby_name;
@@ -449,6 +448,16 @@ void automatch_file(const char *path) {
         }
         return;
     }
+    // A later round on the stage of the round before reloads no scene pack (measured: two rounds on one stage, the
+    // second played with no pack opened and the flow still at its pre-match screen until the step's time was up). The
+    // intro's music is streamed anew each match and is then the stage's first file: it stands for the pack, whose
+    // name is the one already held (vss_name). Only from the second round: at the first one vss_name is the last
+    // pack of the boot's listing, and the pack always opens.
+    if (round_no > 1 && LOAD(in_room) && !LOAD(stage_open) && !strncmp(path, INTRO_STREAM, sizeof INTRO_STREAM - 1)) {
+        rt_log("automatch: +%.1f s the stage of the round before again: no scene pack, its intro's music opens", now_s());
+        stage_open_ms = plat_now_ms(), plat_xchg32(&stage_open, 1);
+        BUMP(seq_vss);
+    }
     if (!LOAD(stage_open) || LOAD(seq_vss_go)) return;
     if (diag && plat_now_ms() - stage_open_ms < 30000 && plat_inc32(&diag_files) <= 600)
         rt_log("automatch: +%.2f s file %s", now_s(), path);
@@ -627,10 +636,82 @@ static void room_screen_seen(void) {
     ui_seen = st, ui_seen_frames = fr;
 }
 
+// ---- the local lobby, measured on 11.3.0 with function census, traces and the log lines below (docs/auto-match.md,
+// "The lobby's menu"):
+// - its sequence (x0 of its frame update, s3->lobby_update) has its state at u32 +0x30: 7 then 3 once the network is
+//   up, 4 and 6 for the "network ready" notice, 3 idle, 16 while the session list searches, 17 creating a session, 20
+//   joining one, 23 to 26 from "ready" to the team screen. Its request to create a session refuses while the lobby is
+//   busy: not in states 0, 3 or 27, its bytes +0x208 clear or +0x20a set, a system window up (the bytes +0x40 or +0x1881
+//   of **(main+lobby_window)) or notices pending (s32 +0x28 of *(main+lobby_messages) above 0). lobby_ready: none holds;
+// - its menu (L) runs its update (s3->lobby_menu) only while it is open, its state at u32 +0xa0: 0 on its private
+//   battle, 1 once A picked it, 2 the session list, 8 the room screen, 9 closing. A welcome message can still be up
+//   once the sequence is idle: L does nothing then, and A moves the message on;
+// - the session list's creation dialog (Y) and a listed session's dialog (A) each run an update while they are up
+//   (s3->create_dialog, s3->join_dialog) and take A only after their opening; the sequence then goes to 17 or 20.
+// The menu and the room screen follow the requests only when they come from the menu: the sequence's request to
+// create a session called directly made the session (a guest joined it) but left the host in the lobby's free roam,
+// its menu offering the empty session list, so the flow presses as a player does, each press gated on these signals.
+static volatile uint64_t lobby_seq;
+static volatile int32_t n_menu_frames;   // the lobby menu's updates (s3->lobby_menu): it runs only while the menu is open
+static volatile int32_t menu_state = -1; // the lobby menu's state (u32 +0xa0) at its last update
+static volatile uint64_t menu_seen_ms;   // when it last ran
+
+// The lobby's menu is open (its update ran in the last 200 ms) in state st; -1 for any state. 0 without the hook.
+static int menu_in(int32_t st) {
+    return s3 && s3->lobby_menu && plat_now_ms() - LOAD(menu_seen_ms) < 200 && (st < 0 || LOAD(menu_state) == st);
+}
+static volatile int32_t n_dialog_frames; // the creation dialog's or a listed session's dialog's updates, while one is up
+
+static int32_t seq_state(void) {
+    uint64_t sq = LOAD(lobby_seq);
+    return sq && readable(sq + 0x30, 4) ? (int32_t)rd32(sq + 0x30) : -1;
+}
+
+// After the press that opens a dialog of the session list (Y: creation; A on a session: join): once the dialog runs,
+// A until the lobby's sequence takes the request (state `want`: 17 creating, 20 joining), never again after; without
+// the dialog's update within 1.5 s, A once, as a player would. 1 when the sequence took it.
+static int confirm_dialog(int32_t f0, int32_t want, int32_t c0, uint64_t end) {
+    if (!(s3 && s3->create_dialog && s3->join_dialog && s3->lobby_update)) return sleep_ms(1500), press("A"), 0;
+    if (!wait_above(&n_dialog_frames, f0, plat_now_ms() + 1500)) return press("A"), 0;
+    int taken = 0;   // the sequence's state, or the network's restart (the state may be left already)
+    for (int k = 0; k < 16 && !taken && before(end); k++) {
+        press("A");
+        uint64_t e = plat_now_ms() + 250;
+        while (!(taken = seq_state() == want || LOAD(n_close) > c0) && before(e)) sleep_ms(10);
+    }
+    return taken;
+}
+
+static int lobby_ready(void) {
+    uint64_t sq = LOAD(lobby_seq);
+    if (!sq || !readable(sq + 0x20a, 1) || rd32(sq + 0x30) != 3) return 0;
+    if (!*(volatile const uint8_t *)(uintptr_t)(sq + 0x208) || *(volatile const uint8_t *)(uintptr_t)(sq + 0x20a)) return 0;
+    uint64_t w = rd64(rd64(main_base + s3->lobby_window)), m = rd64(main_base + s3->lobby_messages);
+    if (!w || !readable(w + 0x1881, 1) || !m || !readable(m + 0x28, 4)) return 0;
+    return !*(volatile const uint8_t *)(uintptr_t)(w + 0x40) && !*(volatile const uint8_t *)(uintptr_t)(w + 0x1881) &&
+           (int32_t)rd32(m + 0x28) <= 0;
+}
+
 void automatch_fn_hit(uint64_t addr) {
     if (!s3) return;
     uint64_t o = addr - main_base;
-    if (o == PIA_BROWSE_DONE) BUMP(n_browse_done);
+    if (s3->lobby_update && o == s3->lobby_update) {
+        Cpu *c = kern_cpu();
+        if (c) __atomic_store_n(&lobby_seq, c->x[0], __ATOMIC_RELEASE);
+        static int32_t seen_seq = -1;   // each change in the log: which step the presses met
+        int32_t st = c && readable(c->x[0] + 0x30, 4) ? (int32_t)rd32(c->x[0] + 0x30) : -2;
+        if (st != seen_seq) rt_log("automatch: +%.2f s lobby sequence state %d -> %d", now_s(), seen_seq, st), seen_seq = st;
+    } else if (s3->lobby_menu && o == s3->lobby_menu) {
+        Cpu *c = kern_cpu();
+        static int32_t seen_menu = -1;
+        int32_t st = c && readable(c->x[0] + 0xa0, 4) ? (int32_t)rd32(c->x[0] + 0xa0) : -2;
+        __atomic_store_n(&menu_state, st, __ATOMIC_RELEASE);   // before the count: a waiter on the count reads it
+        __atomic_store_n(&menu_seen_ms, plat_now_ms(), __ATOMIC_RELEASE);
+        BUMP(n_menu_frames);
+        if (st != seen_menu) rt_log("automatch: +%.2f s lobby menu state %d -> %d", now_s(), seen_menu, st), seen_menu = st;
+    } else if ((s3->create_dialog && o == s3->create_dialog) || (s3->join_dialog && o == s3->join_dialog)) {
+        BUMP(n_dialog_frames);
+    } else if (o == PIA_BROWSE_DONE) BUMP(n_browse_done);
     else if (o == NET_BROWSE) BUMP(n_browse_req);
     else if (o == ROOM_COMMIT) room_commit();
     else if (o == ROOM_SCREEN) BUMP(n_room_frames), room_screen_seen();
@@ -792,9 +873,28 @@ static void search_ended(int32_t d0) {
 static int open_list(uint64_t end) {
     for (int attempt = 1; before(end); attempt++) {
         int32_t b0 = LOAD(n_bind), d0 = LOAD(n_browse_done);
-        press("L");
-        sleep_ms(1500);
-        press("A");
+        if (s3 && s3->lobby_menu) {
+            // L opens the lobby's menu, whose update then runs (n_menu_frames); while a welcome message is up L does
+            // nothing and A moves the message on (A in the lobby's free roam only jumps): L until the menu runs
+            int up = 0;
+            for (int k = 0; k < 20 && !up && before(end); k++) {
+                int32_t m0 = LOAD(n_menu_frames);
+                press("L");
+                up = wait_above(&n_menu_frames, m0, plat_now_ms() + 500);
+                if (!up) press("A"), sleep_ms(300);
+            }
+            // The menu opens on its private battle (menu state 0) and takes A only once its opening ends: A until
+            // the state moves on (1, then 2 with the session list), never again after
+            for (int k = 0; k < 16 && up && LOAD(menu_state) == 0 && before(end); k++) {
+                press("A");
+                uint64_t e = plat_now_ms() + 250;
+                while (LOAD(menu_state) == 0 && before(e)) sleep_ms(10);
+            }
+        } else {
+            press("L");
+            sleep_ms(1500);
+            press("A");
+        }
         if (wait_above(&n_bind, b0, plat_now_ms() + 4000)) {
             mark("session list open");
             search_ended(d0);
@@ -834,9 +934,9 @@ static int back_to_list(int32_t q0, int32_t d0, uint64_t end) {
 static int host_create(uint64_t end) {
     for (int attempt = 1; before(end); attempt++) {
         int32_t c0 = LOAD(n_close), b0 = LOAD(n_bind), q0 = LOAD(n_browse_req), d0 = LOAD(n_browse_done);
+        int32_t f0 = LOAD(n_dialog_frames);
         press("Y");   // "Create a session"
-        sleep_ms(1500);
-        press("A");   // confirm
+        confirm_dialog(f0, 17, c0, end);   // A: confirm
         if (restarted(c0, b0, 8000)) {
             mark("session created");
             jobs_log("created");
@@ -1502,6 +1602,7 @@ static int ui_leaves(int s, int64_t frames, uint32_t max_ms) {
 #define READY_IDLE 60      // frames the room screen shows its state before "ready" is pressed
 #define TEAMS_IDLE 30      // frames the team screen shows before its first press
 #define RETRY_FRAMES 180   // frames without the step's effect before its presses are made again
+#define TEAMS_DOWN_TICKS 12   // between two Downs on the team screen (30 before: 4.5 s for 8 players, now 1.8 s)
 #define STEP_MAX_MS 60000  // wall-clock bound of each wait (a machine at 5 frames a second still counts 300 frames)
 static int in_session = 2;   // the host's room when it starts the match: players, or fewer when spectators did not come
 static int host_setup(char *why, size_t cap) {
@@ -1523,6 +1624,10 @@ static int host_setup(char *why, size_t cap) {
         plat_xchg32(&teams_on, 0);
         return snprintf(why, cap, "the room screen did not settle (state %d, %lld frames in it)", ui_state(),
                         (long long)ui_frames()), 0;
+    }
+    if (s3 && s3->lobby_menu) {   // back from a match the menu reaches the room (8) after the room screen's state: a
+        uint64_t e = plat_now_ms() + 10000;   // "ready" before that was lost (measured: 11 s more for its retry)
+        while (!menu_in(8) && before(e)) sleep_ms(20);
     }
     int s0 = ui_state();
     for (int attempt = 0; attempt < 3 && ui_state() == s0; attempt++) {
@@ -1551,7 +1656,9 @@ static int host_setup(char *why, size_t cap) {
     int left = 0;
     for (int attempt = 0; attempt < 3 && !left; attempt++) {
         if (attempt) rt_log("automatch: +%.1f s \"Teams OK\" not taken after %d frames: again", now_s(), RETRY_FRAMES);
-        for (int r = 0; r <= in_session && r < 11; r++) press_paced("DOWN", 30);
+        // Measured: the team screen takes Downs 12 ticks apart (each held 6), 3 runs of 3; Up on the first row does
+        // not wrap to "Teams OK"
+        for (int r = 0; r <= in_session && r < 11; r++) press_paced("DOWN", TEAMS_DOWN_TICKS);
         shot("teams-set");
         press("A");   // "Teams OK"
         left = ui_leaves(UI_TEAM_SCREEN, RETRY_FRAMES, STEP_MAX_MS);
@@ -1580,7 +1687,7 @@ static int join_session(uint64_t end) {
     // No host answered the search yet: search again (X) until one does
     while (!LOAD(n_reply) && before(end)) {
         int32_t d0 = LOAD(n_browse_done);
-        sleep_ms(2000);
+        if (!(s3 && s3->lobby_update)) sleep_ms(2000);   // search_ended gave the list its second to be drawn
         press("X");
         search_ended(d0);
     }
@@ -1588,9 +1695,9 @@ static int join_session(uint64_t end) {
     mark("a session is listed");
     for (int attempt = 1; before(end); attempt++) {
         int32_t c0 = LOAD(n_close), b0 = LOAD(n_bind), q0 = LOAD(n_browse_req), d0 = LOAD(n_browse_done);
+        int32_t f0 = LOAD(n_dialog_frames);
         press("A");   // the first session of the list
-        sleep_ms(1500);
-        press("A");   // join
+        confirm_dialog(f0, 20, c0, end);   // A: join
         if (restarted(c0, b0, 8000)) {
             mark("session joined");
             jobs_log("joined");
@@ -1607,13 +1714,31 @@ static int join_session(uint64_t end) {
 // (*who: the host for a guest)
 static int to_stage(uint32_t period_ms, uint64_t end) {
     int32_t v0 = LOAD(seq_vss);
-    uint64_t next = 0, worst = 0, told = 0;
+    uint64_t next = 0, worst = 0, told = 0, other = 0;   // other: since when the menu is open on another screen
+    unsigned presses = 0;
     while (before(end)) {
         if (LOAD(seq_vss) > v0) {
             rt_log("automatch: longest silence of a member in the room: %.1f s", worst / 1000.0);
             return 1;
         }
-        if (plat_now_ms() >= next) press("A"), next = plat_now_ms() + period_ms;
+        if (plat_now_ms() >= next && s3 && s3->lobby_menu) {
+            // With the lobby menu's state: A while the menu is on its room (8: the pre-match "A OK!" takes it once
+            // shown, and A does nothing else there) or on its private battle (0: A opens the room), L while the menu is
+            // closed (a guest back in the lobby's free roam), nothing while it moves between screens
+            // (measured on a guest back from a match: L on the room went to state 7, A there to 10, L there back to 8)
+            if (menu_in(8) || menu_in(0)) press("A"), other = 0, next = plat_now_ms() + (role == HOST ? 500 : 1000);
+            else if (!menu_in(-1)) press("L"), other = 0, next = plat_now_ms() + 1000;
+            else if (!other) other = plat_now_ms(), next = plat_now_ms() + 100;
+            else if (plat_now_ms() - other > 3000) press("L"), other = 0, next = plat_now_ms() + 1000;
+            else next = plat_now_ms() + 100;
+        } else if (plat_now_ms() >= next) {
+            // Measured: from the second round a guest waits in the room's free roam, where the pre-match "A OK!" does
+            // not take A (it jumps) and the match started only at the game's 90 s countdown; L opens the match menu,
+            // where A confirms as at the first round
+            press(role == JOIN && round_no > 1 && !(presses & 1) ? "L" : "A");
+            presses++;
+            next = plat_now_ms() + period_ms;
+        }
         uint64_t silent = 0;
         members_present(&silent);
         if (role == JOIN) silent = host_silent_ms();
@@ -2164,7 +2289,13 @@ static int setup(void) {
     if (role == HOST) plat_xchg32(&rules_on, 1);   // the room screen's commit takes the wanted settings (room_commit)
     status("lobby", "opening the session list");
     fnprof_on(FNPROF_AUTO);   // the session jobs and the room's settings are watched until the stage loads
-    sleep_ms(4000);   // the lobby's entry animation; open_list retries anyway
+    if (s3 && s3->lobby_update && s3->lobby_window && s3->lobby_messages) {   // until the lobby is idle (lobby_ready)
+        uint64_t e = plat_now_ms() + 4000;
+        while (!lobby_ready() && before(e)) sleep_ms(20);
+        mark(lobby_ready() ? "lobby idle" : "lobby not idle after 4 s");
+    } else {
+        sleep_ms(4000);   // the lobby's entry animation; open_list retries anyway
+    }
     { uint64_t st = lobby_state(); base_utc = st ? rd64(st + REC_OFF + 0x98) : 0; }   // a record from before
     shot("lobby");
     if (!open_list(until(T_LIST))) {

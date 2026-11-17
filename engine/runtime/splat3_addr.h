@@ -35,6 +35,13 @@ typedef struct {
     // RomFS: the build's tag in the names of versioned files (RSDB/<table>.Product.<tag>.rstbl.byml.zs,
     // Mals/<language>.Product.<tag>.sarc.zs)
     const char *romfs_tag;
+    // auto_match.c (0: the build has no row for them, the flow waits a fixed time for the lobby instead)
+    uint64_t lobby_update;             // the local lobby's sequence: its frame update (x0 the sequence)
+    uint64_t lobby_window;             // data: -> -> the system windows' state (+0x40, +0x1881: a window is up)
+    uint64_t lobby_messages;           // data: -> the lobby's pending messages (+0x28: their count)
+    uint64_t lobby_menu;               // the lobby menu's frame update (x0 the menu)
+    uint64_t create_dialog;            // the session creation dialog's frame update
+    uint64_t join_dialog;              // the dialog of a listed session (join)'s frame update
 } Splat3Addr;
 
 // The running target's row, or NULL when the target is not a Splatoon 3 build with a row.

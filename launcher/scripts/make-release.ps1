@@ -15,8 +15,9 @@
 # -Channel   stable (default) or beta (a pre-release version such as 0.3.0-beta.1 must be beta)
 # -Out       the release folder (default: release\<version> beside src-tauri, ignored by git); must not exist yet
 # -SkipBuild uses the build already in the target folder (it must have been made with the same -Repo)
-# -DiscordClientId  the application id of the maintainers' Discord application (compiled in: KALAMAR_DISCORD_CLIENT_ID; the
-#            opt-in Discord presence, docs\discord-presence.md); left out, the release has no Discord feature
+# -DiscordClientId  the application id of the Discord application (compiled in: KALAMAR_DISCORD_CLIENT_ID; the opt-in
+#            Discord presence, docs\discord-presence.md); left out, the id of src-tauri\discord-app-id.txt; `none` for a
+#            release without the Discord feature
 param(
     [Parameter(Mandatory = $true)][string]$Repo,
     [Parameter(Mandatory = $true)][string]$Version,
@@ -47,7 +48,12 @@ Step 'checks'
 if ($Repo -notmatch '^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$') { Fail '-Repo must be owner/repo' }
 if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$') { Fail '-Version must be like 0.2.0 or 0.3.0-beta.1 (no v, no build metadata)' }
 if ($Channel -eq 'stable' -and $Version.Contains('-')) { Fail "$Version is a pre-release version: use -Channel beta" }
-if ($DiscordClientId -and $DiscordClientId -notmatch '^\d{17,20}$') { Fail '-DiscordClientId must be the application id: 17 to 20 digits' }
+if ($DiscordClientId -eq 'none') {
+    $DiscordClientId = ''
+} elseif (-not $DiscordClientId) {
+    $idFile = Join-Path $Tauri 'discord-app-id.txt'
+    if (Test-Path -LiteralPath $idFile) { $DiscordClientId = [string](Get-Content -LiteralPath $idFile | Where-Object { $_ -match '^\d{17,20}$' } | Select-Object -First 1) }
+} elseif ($DiscordClientId -notmatch '^\d{17,20}$') { Fail '-DiscordClientId must be the application id (17 to 20 digits) or none' }
 
 $cargoVersion = (Select-String -Path (Join-Path $Tauri 'Cargo.toml') -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
 $tauriVersion = (Get-Content (Join-Path $Tauri 'tauri.conf.json') -Raw | ConvertFrom-Json).version
@@ -87,8 +93,8 @@ $Target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path 
 
 # ---- the build, with the update repository compiled in ------------------------------------------------------------------
 $env:KALAMAR_UPDATE_REPO = $Repo
-# Set or cleared: a value left in the shell never slips into a release.
-$env:KALAMAR_DISCORD_CLIENT_ID = $DiscordClientId
+# Always set: a value left in the shell never slips into a release (`none`: scripts\release-build.ps1 builds without).
+$env:KALAMAR_DISCORD_CLIENT_ID = if ($DiscordClientId) { $DiscordClientId } else { 'none' }
 if (-not $SkipBuild) {
     Step "npm run tauri:release (KALAMAR_UPDATE_REPO=$Repo; Discord application: $(if ($DiscordClientId) { $DiscordClientId } else { 'none' }); the paths of this machine remapped)"
     Push-Location $Launcher
@@ -108,7 +114,8 @@ Step 'the program carries the repository and the public keys'
 $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe))
 if (-not $text.Contains($Repo)) { Fail "$Exe was not built with KALAMAR_UPDATE_REPO=$Repo (run without -SkipBuild)" }
 foreach ($k in $Keys) { if (-not $text.Contains($k)) { Fail "$Exe does not carry the public key $k (rebuild)" } }
-if ($DiscordClientId -and -not $text.Contains($DiscordClientId)) { Fail "$Exe was not built with KALAMAR_DISCORD_CLIENT_ID=$DiscordClientId (run without -SkipBuild)" }
+if ($DiscordClientId -and -not $text.Contains($DiscordClientId)) { Fail "$Exe was not built with KALAMAR_DISCORD_CLIENT_ID=$DiscordClientId (run without -SkipBuild, or with -DiscordClientId none for a release without the Discord presence)" }
+Write-Host "Discord application: $(if ($DiscordClientId) { $DiscordClientId } else { 'none' })"
 $text = $null
 
 # Nothing of the machine that built it (a build made without scripts\release-build.ps1 carries the user's profile path in

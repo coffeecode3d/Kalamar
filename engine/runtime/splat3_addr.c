@@ -2,8 +2,8 @@
 // auto_match.c); the 11.3.0 row is the 11.2.0 one carried by tools/port_offsets.py: every code offset lies in a run of
 // thousands of instructions equal to 11.2.0's but for their targets, the callers of the function entries agree, and
 // every adrp pair that formed a data address in 11.2.0 forms the new one in 11.3.0. The gyro tuning and camera offsets
-// (mouse_native.c) and the gyro processor (input_first.c) were found in 11.3.0 and are not carried to 11.2.0, whose row
-// leaves them 0. The RomFS tag is the one in the names of the build's own RSDB and Mals files.
+// (mouse_native.c), the gyro processor (input_first.c) and the lobby's sequence, menu and dialogs (auto_match.c) were
+// found in 11.3.0 and are not carried to 11.2.0, whose row leaves them 0. The RomFS tag is the one in the names of the build's own RSDB and Mals files.
 #include <string.h>
 
 #include "host.h"
@@ -25,7 +25,9 @@ static const Splat3Addr rows[] = {
      .room_commit = 0x38fa270, .room_screen = 0x38f8930,
      .net_versus_out = 0x3d7d038, .net_versus_in = 0x3d7d184,
      .net_common_out = 0x3d7d6e4, .net_common_in = 0x3d7d814, .net_common_in_b = 0x3d7d8a8,
-     .rule_names = 0x4f31499, .gyro_tuning = 0x60c1df8, .gyro_attitude_load = 0x2afb014,
+     .rule_names = 0x4f31499, .lobby_update = 0x38aa030, .lobby_window = 0x5f22a98, .lobby_messages = 0x604cc90, .lobby_menu = 0x391e480,
+     .create_dialog = 0x38cc3d0, .join_dialog = 0x38d29b4,
+     .gyro_tuning = 0x60c1df8, .gyro_attitude_load = 0x2afb014,
      .pitch_curve = 0x28fba70, .camera_pose = 0x28eb664, .gyro_processor = 0x2afaf6c, .romfs_tag = "b30"},
 };
 

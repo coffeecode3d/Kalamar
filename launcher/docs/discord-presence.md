@@ -120,9 +120,11 @@ anything. Nothing else of the application (client secret, bot, OAuth2, redirects
    draws them again (with the installed Edge, offline). Upload no picture of the game or its publisher. Uploaded
    pictures can take a few minutes to show in Discord. Leave the "Rich Presence Invite Image" empty (joining from
    Discord is not offered, below).
-4. Build with the id: `KALAMAR_DISCORD_CLIENT_ID=<id>` in the environment of the build (`build.rs`; a value that is not
-   17 to 20 digits fails the build), or `scripts\make-release.ps1 ... -DiscordClientId <id>`. Without it the build has no
-   Discord feature, like every development build.
+4. Write the id in `src-tauri/discord-app-id.txt`: every release build (`npm run tauri:release`,
+   `scripts\make-release.ps1`) then carries it. `KALAMAR_DISCORD_CLIENT_ID=<id>` in the environment of a build (`build.rs`;
+   a value that is not 17 to 20 digits fails the build) or `scripts\make-release.ps1 ... -DiscordClientId <id>` names
+   another one, and `none` in either place makes a release without the feature. A plain development build reads neither
+   the file nor anything else: it has no Discord feature.
 5. Try it: start that build with Discord open, Settings › Discord, switch it on, look at your own profile in Discord
    (or ask a friend). `splat3.exe --probe-discord` with `KLM_DISCORD_APP_ID=<id>` checks the engine's side alone (it
    shows "In game", in the menu language, for ten seconds).

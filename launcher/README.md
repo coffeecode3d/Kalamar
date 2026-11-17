@@ -36,7 +36,7 @@ A development start must not touch a player's real data: set `KALAMAR_APPDATA=<f
 | `KALAMAR_DATA`, `KALAMAR_APPDATA` | run | where the launcher keeps its data (above) |
 | `KALAMAR_TRACE=<file>` | run | a timeline of the start-up ([docs/launching.md](docs/launching.md)) |
 | `KALAMAR_UPDATE_REPO=owner/repo` | build | gives the build its update feature, checked with the public keys of `src-tauri/update-keys.txt`; unset: no update feature |
-| `KALAMAR_DISCORD_CLIENT_ID=<id>` | build | gives the build its opt-in Discord presence; unset: no such feature |
+| `KALAMAR_DISCORD_CLIENT_ID=<id>` | build | gives the build its opt-in Discord presence; unset: no such feature, except in a release build (`npm run tauri:release`), which takes the id of `src-tauri/discord-app-id.txt` unless the value is `none` |
 
 The older names `SPLAT3_GAME_ROOT` and `SPLAT3_LAUNCHER_DATA` are still read.
 

@@ -165,8 +165,9 @@ chat or a log, sign on a shared or untrusted machine.
    repository and the public keys, and no trace of this machine (user name, `Users\<name>`, the repository's path); writes `release\0.2.0\` with `Kalamar.exe`, `Kalamar_0.2.0_x64-setup.exe`, `RELEASE-NOTES.txt`,
    `kalamar-release.json`; has minisign sign it (minisign asks for the key's password; `kalamar-release.json.minisig`); runs the launcher's
    own check on the folder; writes `SHA256SUMS`. Nothing is uploaded. Unplug the key medium. With
-   `-DiscordClientId <application id>` the release also has the opt-in Discord presence (the id of your Discord
-   application: [discord-presence.md](discord-presence.md)); without it, none.
+   The release has the opt-in Discord presence of the application named in `src-tauri/discord-app-id.txt`
+   ([discord-presence.md](discord-presence.md)); `-DiscordClientId <application id>` names another one and
+   `-DiscordClientId none` makes a release without it.
 4. Tag and push the tag: `git tag v0.2.0 <commit>` then `git push origin v0.2.0`.
 5. On GitHub, **Releases › Draft a new release**: tag `v0.2.0`, title `Kalamar 0.2.0`, the notes as text; attach
    **every file** of `release\0.2.0\` (the launcher needs `kalamar-release.json` and `kalamar-release.json.minisig`;
@@ -233,7 +234,8 @@ tag only when the repository variable `KALAMAR_RELEASE_CI` is `enabled`. What it
 1. checks that the tag (`v0.2.0`) matches the versions of `package.json`, `src-tauri/tauri.conf.json` and
    `src-tauri/Cargo.toml`, and takes the release notes from the tag's message (`git tag -a v0.2.0 -m "..."`);
 2. builds with `npm run tauri:release` and `KALAMAR_UPDATE_REPO` set to the repository (and
-   `KALAMAR_DISCORD_CLIENT_ID` from the repository variable of that name, when set: the id is public);
+   `KALAMAR_DISCORD_CLIENT_ID` from the repository variable of that name, when set; otherwise the id of
+   `src-tauri/discord-app-id.txt`: the id is public);
 3. writes `kalamar-release.json` (`release_sign manifest`), `RELEASE-NOTES.txt` and `SHA256SUMS`, keeps them as a
    workflow artifact, and creates a **draft** release with them.
 

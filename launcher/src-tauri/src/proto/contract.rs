@@ -157,6 +157,12 @@ pub fn loadout_for(m: &Value, member: &str, team: &str) -> Vec<(String, Constrai
         .collect()
 }
 
+/// Whether a round can go to the game that is already open: the loadout is applied once, when the game starts, so the
+/// round must ask for the very loadout that game started with, and nothing in it may wait for the player's pick.
+pub fn loadout_continues(started_with: &[(String, Constraint)], wanted: &[(String, Constraint)]) -> bool {
+    started_with == wanted && wanted.iter().all(|(_, c)| matches!(c, Constraint::Fixed(_)))
+}
+
 /// The ids to impose, slot by slot: a fixed id; for a choice, the player's pick when it complies, else the current
 /// item (the launcher's profile) when it complies, else the first allowed id (`last_call`, the launch can wait no more).
 /// Returns the chosen ids and the slots still waiting for the player's pick.
@@ -741,6 +747,18 @@ mod tests {
         m["rules"]["mode"] = json!("zones");
         assert!(plan(&m, MODES).is_ok());
         assert!(plan(&m, &["turf"]).is_err());
+    }
+
+    #[test]
+    fn a_round_continues_in_the_open_game_only_with_the_same_fixed_loadout() {
+        let fixed = |id: &str| vec![("weapon".to_string(), Constraint::Fixed(id.into()))];
+        let choice = vec![("weapon".to_string(), Constraint::Allowed(vec!["1".into()]))];
+        assert!(loadout_continues(&[], &[]), "no loadout either time");
+        assert!(loadout_continues(&fixed("40"), &fixed("40")), "the same fixed loadout");
+        assert!(!loadout_continues(&fixed("40"), &fixed("50")), "another weapon: the game starts anew");
+        assert!(!loadout_continues(&fixed("40"), &[]), "the open game would keep the old loadout");
+        assert!(!loadout_continues(&[], &fixed("40")), "the open game has none");
+        assert!(!loadout_continues(&choice, &choice), "a choice may change with the player's pick");
     }
 
     #[test]

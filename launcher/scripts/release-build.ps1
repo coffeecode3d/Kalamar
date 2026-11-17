@@ -36,6 +36,17 @@ if ($CheckOnly) {
     $env:CARGO_ENCODED_RUSTFLAGS = (@($given) + $flags) -join [char]0x1f
     Write-Host "release-build: remapping $($maps.Count) path prefixes (user profile, repository, rustup, Cargo)"
 
+    # The releases' Discord application (src-tauri\discord-app-id.txt), unless the caller names one
+    # (KALAMAR_DISCORD_CLIENT_ID=<id>) or refuses it (KALAMAR_DISCORD_CLIENT_ID=none).
+    if ($env:KALAMAR_DISCORD_CLIENT_ID -eq 'none') {
+        $env:KALAMAR_DISCORD_CLIENT_ID = ''
+    } elseif (-not $env:KALAMAR_DISCORD_CLIENT_ID) {
+        $idFile = Join-Path $repo 'src-tauri\discord-app-id.txt'
+        $id = if (Test-Path -LiteralPath $idFile) { Get-Content -LiteralPath $idFile | Where-Object { $_ -match '^\d{17,20}$' } | Select-Object -First 1 } else { $null }
+        if ($id) { $env:KALAMAR_DISCORD_CLIENT_ID = $id }
+    }
+    Write-Host "release-build: Discord application: $(if ($env:KALAMAR_DISCORD_CLIENT_ID) { $env:KALAMAR_DISCORD_CLIENT_ID } else { 'none' })"
+
     Push-Location $repo
     try {
         & npx tauri build @TauriArgs

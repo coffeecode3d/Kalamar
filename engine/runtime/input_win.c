@@ -85,7 +85,7 @@ uint32_t input_key_char(int key) {
 static volatile LONG mouse_dx, mouse_dy;   // raw counts since the last frame sample
 static volatile LONG mouse_travel;          // raw counts moved in total, captured or not (ikb_mouse_travel)
 static volatile LONG mouse_wheel;           // wheel turned while captured, in WHEEL_DELTA units (ikb_wheel_take)
-static volatile LONG cur_captured;         // cursor hidden and confined to the client area
+static volatile LONG cur_captured;         // cursor hidden and held at the client area's center
 static volatile LONG cur_active;           // WM_ACTIVATEAPP: the window's application is active
 // Bits: CUR_REL, Esc or activation by a click on the title bar or border: until a client click; CUR_ESC, set with CUR_REL
 // by Esc (not when it was already set): closing the menu gives the capture back. One word, changed by one CAS.
@@ -101,16 +101,20 @@ static LONG rel_clear(LONG o) { (void)o; return 0; }
 static LONG rel_menu_closed(LONG o) { return o & CUR_ESC ? 0 : o; }
 static volatile LONG cur_suspend;          // F11 or a modal size or move loop under way
 static SRWLOCK cur_lock = SRWLOCK_INIT;    // serialises cursor_update (window thread, input_block callers)
-// Hide the cursor and confine it to the client area while the window is focused, not suspended, not behind a text entry
-// or the menu, and the mouse camera is on; release it otherwise. Safe from any thread.
+// Hide the cursor and hold it at the client area's center while the window is focused, not suspended, not behind a text
+// entry or the menu, and the mouse camera is on; release it otherwise. Safe from any thread. The camera reads raw
+// motion (WM_INPUT), never the cursor's place, so the cursor need not move: confined to the whole client area, it
+// reached the screen's edge in fullscreen, where an auto-hidden taskbar rises on the touch and takes the next click
+// out of the game.
 static void cursor_update(HWND h) {
     AcquireSRWLockExclusive(&cur_lock);
     int want = h && cur_active && !(cur_rel & CUR_REL) && !cur_suspend && input_cursor_allowed() &&
                GetForegroundWindow() == h && !IsIconic(h);
-    RECT r;
-    POINT tl = {0, 0};
-    if (want && GetClientRect(h, &r) && ClientToScreen(h, &tl)) {
-        RECT clip = {tl.x, tl.y, tl.x + r.right, tl.y + r.bottom};
+    RECT r = {0};
+    if (want) want = GetClientRect(h, &r);
+    POINT c = {r.right / 2, r.bottom / 2};
+    if (want && ClientToScreen(h, &c)) {
+        RECT clip = {c.x, c.y, c.x + 1, c.y + 1};
         ClipCursor(&clip);
         if (!cur_captured) { InterlockedExchange(&mouse_dx, 0); InterlockedExchange(&mouse_dy, 0); }
         InterlockedExchange(&cur_captured, 1);

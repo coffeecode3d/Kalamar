@@ -192,6 +192,8 @@ struct Session {
     /// room is the host's), else the game is started anew.
     host_name: String,
     role: crate::automatch::Role,
+    /// The loadout constraints the game was started with (`SPLAT3_MATCH_LOADOUT`, applied once, at its start).
+    loadout: Vec<(String, contract::Constraint)>,
 }
 
 pub struct Runner {
@@ -460,9 +462,8 @@ impl Runner {
         // 2. A round of the open game session: sent to the running game, no new process.
         let continuing = {
             let s = lock(&self.session);
-            s.as_ref().is_some_and(|s| plan.continue_from.as_deref() == Some(s.last.as_str()) && s.room == plan.room && s.paths.cmd.is_some() && s.host_name == plan.host_name && s.role == plan.role)
-        } && plan.loadout.is_empty()
-            && self.host.status().running;
+            s.as_ref().is_some_and(|s| plan.continue_from.as_deref() == Some(s.last.as_str()) && s.room == plan.room && s.paths.cmd.is_some() && s.host_name == plan.host_name && s.role == plan.role && contract::loadout_continues(&s.loadout, &plan.loadout))
+        } && self.host.status().running;
         // 2a. Only a match this launcher engaged in during this run starts by itself (`consent`): anything else, and a
         // launch beyond the per-server caps, waits for the player's yes. A new game only ever talks to a relay the
         // server announced. Nothing is closed, written or started before that.
@@ -587,6 +588,8 @@ impl Runner {
         }
         if continuing {
             st.phase = "continuing".into();
+            // The game keeps the loadout it started with: the same fixed one, so what the server is told stays true.
+            st.loadout = Some(Value::Object(plan.loadout.iter().filter_map(|(slot, c)| match c { contract::Constraint::Fixed(f) => Some((slot.clone(), Value::String(f.clone()))), _ => None }).collect()));
             self.publish(&st);
             let cmd = paths.cmd.clone().expect("command file");
             if let Err(e) = append_command(&cmd, &contract::next_command(&plan)) {
@@ -717,7 +720,7 @@ impl Runner {
             }
         }
         self.client.consent.launched(&m, !continuing, Instant::now());
-        *lock(&self.session) = plan.keep_open.then(|| Session { room: plan.room.clone(), paths: paths.clone(), last: plan.id.clone(), series: series.clone(), host_name: plan.host_name.clone(), role: plan.role });
+        *lock(&self.session) = plan.keep_open.then(|| Session { room: plan.room.clone(), paths: paths.clone(), last: plan.id.clone(), series: series.clone(), host_name: plan.host_name.clone(), role: plan.role, loadout: plan.loadout.clone() });
         // 6. Report the launch (idempotent; retried on network errors).
         for i in 0..5 {
             // What was imposed, for the server (informational): `{"loadout": {"weapon", "gear": {...}}}`.

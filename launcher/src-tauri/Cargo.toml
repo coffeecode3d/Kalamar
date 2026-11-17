@@ -1,6 +1,6 @@
 [package]
 name = "kalamar"
-version = "0.3.8"
+version = "0.3.10"
 description = "Kalamar launcher (unofficial fan project)"
 authors = ["The Kalamar contributors"]
 license = "MIT"
