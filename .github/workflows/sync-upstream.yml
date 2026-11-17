@@ -48,7 +48,7 @@ jobs:
         id: check
         run: |
           set -uo pipefail
-          git remote add upstream https://github.com/CyriacFR/Kalamar.git 2>/dev/null || true
+          git remote get-url upstream >/dev/null 2>&1             || git remote add upstream https://github.com/CyriacFR/Kalamar.git
           git fetch --no-tags --quiet upstream main
           if git merge-base --is-ancestor upstream/main origin/main; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
@@ -67,7 +67,7 @@ jobs:
         if: steps.check.outputs.stale != 'true'
         run: |
           set -uo pipefail
-          git remote add upstream https://github.com/CyriacFR/Kalamar.git
+          git remote get-url upstream >/dev/null 2>&1             || git remote add upstream https://github.com/CyriacFR/Kalamar.git
           git fetch --no-tags upstream main
           if git merge --no-edit upstream/main; then
             if git diff --quiet HEAD origin/linux; then
