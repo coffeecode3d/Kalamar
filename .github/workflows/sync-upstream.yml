@@ -84,6 +84,24 @@ jobs:
             git merge --abort
             echo "conflict=true" >> "$GITHUB_OUTPUT"
           fi
+      # A merge brings upstream's launcher version; the tag is what builds and publishes the AppImage for it
+      # (.github/workflows/linux-appimage.yml). No tag when that version already has one.
+      - name: Tag a release for a new launcher version
+        if: steps.check.outputs.stale != 'true' && steps.merge.outputs.conflict != 'true' && steps.merge.outputs.blocked != 'true'
+        run: |
+          set -uo pipefail
+          v=$(python3 -c "import json;print(json.load(open('launcher/src-tauri/tauri.conf.json'))['version'])")
+          if git tag --list "v${v}-linux.*" | grep -q .; then
+            echo "Linux release for $v exists already: $(git tag --list "v${v}-linux.*" | tail -1)"
+            exit 0
+          fi
+          n=1
+          while git rev-parse -q --verify "refs/tags/v${v}-linux.${n}" >/dev/null; do n=$((n+1)); done
+          tag="v${v}-linux.${n}"
+          up=$(git rev-parse --short upstream/main)
+          git tag -a "$tag" -m "Linux port ${v}-linux.${n}: upstream $up"
+          git push origin "$tag"
+          echo "tagged $tag for upstream $up"
       - name: Explain what needs a hand
         if: steps.merge.outputs.conflict == 'true' || steps.merge.outputs.blocked == 'true'
         env:
